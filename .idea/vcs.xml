@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="VcsDirectoryMappings">
+    <mapping directory="$PROJECT_DIR$" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/external/args" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/external/fmt" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/external/glfw" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/external/glm" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/external/imgui" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/external/pybind11" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/external/tiny-cuda-nn" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/external/tiny-cuda-nn/dependencies/cutlass" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/external/tiny-cuda-nn/dependencies/fmt" vcs="Git" />
+  </component>
+</project>
