@@ -27,46 +27,237 @@
  **************************************************************************/
 #include "CustomPathTracer.h"
 #include "RenderGraph/RenderPassLibrary.h"
+#include "RenderGraph/RenderPassHelpers.h"
+#include "RenderGraph/RenderPassStandardFlags.h"
 
-const RenderPass::Info CustomPathTracer::kInfo { "CustomPathTracer", "Insert pass description here." };
+const RenderPass::Info CustomPathTracer::kInfo{"CustomPathTracer", "Insert pass description here."};
 
 // Don't remove this. it's required for hot-reload to function properly
-extern "C" FALCOR_API_EXPORT const char* getProjDir()
-{
+extern "C" FALCOR_API_EXPORT const char *getProjDir() {
     return PROJECT_DIR;
 }
 
-extern "C" FALCOR_API_EXPORT void getPasses(Falcor::RenderPassLibrary& lib)
-{
+extern "C" FALCOR_API_EXPORT void getPasses(Falcor::RenderPassLibrary &lib) {
     lib.registerPass(CustomPathTracer::kInfo, CustomPathTracer::create);
 }
 
-CustomPathTracer::SharedPtr CustomPathTracer::create(RenderContext* pRenderContext, const Dictionary& dict)
-{
-    SharedPtr pPass = SharedPtr(new CustomPathTracer());
+namespace {
+    const char kShaderFile[] = "RenderPasses/CustomPathTracer/CustomPathTracer.rt.slang";
+
+    // traversal stack sizeってなんですか？
+    const uint32_t kMaxPayloadSizeBytes = 72u;
+    const uint32_t kMaxRecursionDepth = 2u;
+
+    // viewWってなんですか？
+    // worldspace view directionってなんですか？
+    const char kInputViewDir[] = "viewW";
+
+    const ChannelList kInputChannels = {
+            {"vbuffer", "gVBuffer", "Visibility buffer"},
+            {kInputViewDir, "gViewW", "World-Space view Direction"},
+    };
+
+    const ChannelList kOutputChannels = {
+            {"color", "gOutputColor", "out color by raytracing"}
+    };
+
+    const char kMaxBounces[] = "maxBounces";
+    const char kComputeDirect[] = "computeDirect";
+    const char kDirectOnly[] = "directOnly";
+    const char kUseImportanceSampling[] = "useImportanceSampling";
+}
+
+CustomPathTracer::SharedPtr CustomPathTracer::create(RenderContext *pRenderContext, const Dictionary &dict) {
+    SharedPtr pPass = SharedPtr(new CustomPathTracer(dict));
     return pPass;
 }
 
-Dictionary CustomPathTracer::getScriptingDictionary()
-{
-    return Dictionary();
+CustomPathTracer::CustomPathTracer(const Dictionary &dict) : RenderPass(kInfo) {
+    parseDictionary(dict);
+
+    mpSampleGenerator = SampleGenerator::create(SAMPLE_GENERATOR_DEFAULT);
+    FALCOR_ASSERT(mpSampleGenerator);
 }
 
-RenderPassReflection CustomPathTracer::reflect(const CompileData& compileData)
-{
+// これはなんですか？
+// 名前のまんまでした
+void CustomPathTracer::parseDictionary(const Dictionary &dict) {
+    for (const auto&[key, value]: dict) {
+        if (key == kMaxBounces)mMaxBounces = value;
+        else if (key == kComputeDirect)mComputeDirect = value;
+        else if (key == kDirectOnly)mDirectOnly = value;
+        else if (key == kUseImportanceSampling)mUseImportanceSampling = value;
+        else logWarning("Unknown field '{}' in CustomPathTracer dictionary.", key);
+    }
+}
+
+Dictionary CustomPathTracer::getScriptingDictionary() {
+    Dictionary d;
+    d[kMaxBounces] = mMaxBounces;
+    d[kComputeDirect] = mComputeDirect;
+    d[kDirectOnly] = mDirectOnly;
+    d[kUseImportanceSampling] = mUseImportanceSampling;
+    return d;
+}
+
+RenderPassReflection CustomPathTracer::reflect(const CompileData &compileData) {
     // Define the required resources here
     RenderPassReflection reflector;
-    //reflector.addOutput("dst");
-    //reflector.addInput("src");
+    addRenderPassInputs(reflector, kInputChannels);
+    addRenderPassOutputs(reflector, kOutputChannels);
     return reflector;
 }
 
-void CustomPathTracer::execute(RenderContext* pRenderContext, const RenderData& renderData)
-{
+void CustomPathTracer::execute(RenderContext *pRenderContext, const RenderData &renderData) {
+    // オプション変数を更新する
+    auto &dict = renderData.getDictionary();
+    if (mOptionsChanged) {
+        auto flags = dict.getValue(kRenderPassRefreshFlags, RenderPassRefreshFlags::None);
+        dict[Falcor::kRenderPassRefreshFlags] = flags | Falcor::RenderPassRefreshFlags::RenderOptionsChanged;
+        mOptionsChanged = false;
+    }
+
+    if (mpScene == nullptr) {
+        for (auto cd: kOutputChannels) {
+            Texture *pDst = renderData.getTexture(cd.name).get();
+            if (pDst)pRenderContext->clearTexture(pDst);
+        }
+        return;
+    }
+
+    // シーンの変更を許可しないのはなぜですか？
+
+    if (mpScene->getRenderSettings().useEmissiveLights) {
+        mpScene->getLightCollection(pRenderContext);
+    }
+
+    const bool useDOF = mpScene->getCamera()->getApertureRadius() > 0.f;
+    if (useDOF && renderData[kInputViewDir] == nullptr) {
+        // これはなんですか？
+        logWarning("Depth-of-field requires the '{}' input. Expect incorrect shading.", kInputViewDir);
+    }
+
+    // シェーダーに定数を追加していきますよ。
+    mTracer.pProgram->addDefine("MAX_BOUNCES", std::to_string(mMaxBounces));
+    mTracer.pProgram->addDefine("COMPUTE_DIRECT", mComputeDirect ? "1" : "0");
+    mTracer.pProgram->addDefine("DIRECT_ONLY", mDirectOnly ? "1" : "0");
+    mTracer.pProgram->addDefine("USE_ANALYTIC_LIGHT", mpScene->useAnalyticLights() ? "1" : "0");
+    mTracer.pProgram->addDefine("USE_EMISSIVE_LIGHT", mpScene->useEmissiveLights() ? "1" : "0");
+    mTracer.pProgram->addDefine("USE_ENV_LIGHT", mpScene->useEnvLight() ? "1" : "0");
+    mTracer.pProgram->addDefine("USE_ENV_BACKGROUND", mpScene->useEnvBackground() ? "1" : "0");
+
+    mTracer.pProgram->addDefines(getValidResourceDefines(kInputChannels, renderData));
+    mTracer.pProgram->addDefines(getValidResourceDefines(kOutputChannels, renderData));
+
+    if (!mTracer.pVars) prepareVars();
+    FALCOR_ASSERT(mTracer.pVars);
+
+    auto var = mTracer.pVars->getRootVar();
+    var["CB"]["gFrameCount"] = mFrameCount;
+    var["CB"]["gPRNGDimension"] = dict.keyExists(kRenderPassPRNGDimension) ? dict[kRenderPassPRNGDimension] : 0u;
+
+    auto bind = [&](const ChannelDesc &desc) {
+        if (!desc.texname.empty()) {
+            var[desc.texname] = renderData.getTexture(desc.name);
+        }
+    };
+    for (auto channel: kInputChannels) bind(channel);
+    for (auto channel: kOutputChannels)bind(channel);
+
+    const uint2 targetDim = renderData.getDefaultTextureDims();
+    FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
+    mpScene->raytrace(pRenderContext, mTracer.pProgram.get(), mTracer.pVars, uint3(targetDim, 1));
+    mFrameCount++;
     // renderData holds the requested resources
     // auto& pTexture = renderData.getTexture("src");
 }
 
-void CustomPathTracer::renderUI(Gui::Widgets& widget)
-{
+void CustomPathTracer::prepareVars() {
+    FALCOR_ASSERT(mpScene);
+    FALCOR_ASSERT(mTracer.pProgram);
+
+    mTracer.pProgram->addDefines(mpSampleGenerator->getDefines());
+    mTracer.pProgram->setTypeConformances(mpScene->getTypeConformances());
+
+    mTracer.pVars = RtProgramVars::create(mTracer.pProgram, mTracer.pBindingTable);
+
+    auto var = mTracer.pVars->getRootVar();
+    mpSampleGenerator->setShaderData(var);
+}
+
+void CustomPathTracer::setScene(RenderContext *pRenderContext, const Scene::SharedPtr &pScene) {
+    mTracer.pProgram = nullptr;
+    mTracer.pBindingTable = nullptr;
+    mTracer.pVars;
+    mFrameCount = 0;
+    mpScene = pScene;
+    if (!mpScene) return;
+
+    if (pScene->hasGeometryType(Scene::GeometryType::Custom))
+        logWarning("CustomPathTracer: This render pass does not support custom primitives.");
+
+    RtProgram::Desc desc;
+    desc.addShaderModules(mpScene->getShaderModules());
+    desc.addShaderLibrary(kShaderFile);
+    desc.setMaxPayloadSize(kMaxPayloadSizeBytes);
+    desc.setMaxAttributeSize(mpScene->getRaytracingMaxAttributeSize());
+    desc.setMaxTraceRecursionDepth(kMaxRecursionDepth);
+
+    mTracer.pBindingTable = RtBindingTable::create(2, 2, mpScene->getGeometryCount());
+    auto &sbt = mTracer.pBindingTable;
+    sbt->setRayGen(desc.addRayGen("rayGen"));
+    sbt->setMiss(0, desc.addMiss("scatterMiss"));
+    sbt->setMiss(1, desc.addMiss("shadowMiss"));
+
+    if (mpScene->hasGeometryType(Scene::GeometryType::TriangleMesh)) {
+        sbt->setHitGroup(0, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh),
+                         desc.addHitGroup("scatterTriangleMeshClosestHit", "scatterTriangelMeshAnyHit"));
+        sbt->setHitGroup(1, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh),
+                         desc.addHitGroup("", "shadowTriangleMeshAnyHit"));
+    }
+
+    if (mpScene->hasGeometryType(Scene::GeometryType::DisplacedTriangleMesh)) {
+        sbt->setHitGroup(0, mpScene->getGeometryIDs(Scene::GeometryType::DisplacedTriangleMesh),
+                         desc.addHitGroup("scatterDisplacedTriangleMeshClosestHit", "",
+                                          "displacedTriangleMeshIntersection"));
+        sbt->setHitGroup(1, mpScene->getGeometryIDs(Scene::GeometryType::DisplacedTriangleMesh),
+                         desc.addHitGroup("", "", "displacedTriangleMeshIntersection"));
+    }
+
+    if (mpScene->hasGeometryType(Scene::GeometryType::Curve)) {
+        sbt->setHitGroup(0, mpScene->getGeometryIDs(Scene::GeometryType::Curve),
+                         desc.addHitGroup("scatterCurveClosestHit", "", "curveIntersection"));
+        sbt->setHitGroup(1, mpScene->getGeometryIDs(Scene::GeometryType::Curve),
+                         desc.addHitGroup("", "", "curveIntersection"));
+    }
+
+    if (mpScene->hasGeometryType(Scene::GeometryType::SDFGrid)) {
+        sbt->setHitGroup(0, mpScene->getGeometryIDs(Scene::GeometryType::SDFGrid),
+                         desc.addHitGroup("scatterSdfGridClosestHit", "", "sdfGridIntersection"));
+        sbt->setHitGroup(1, mpScene->getGeometryIDs(Scene::GeometryType::SDFGrid),
+                         desc.addHitGroup("", "", "sdfGridIntersection"));
+    }
+    mTracer.pProgram = RtProgram::create(desc, mpScene->getSceneDefines());
+
+}
+
+
+void CustomPathTracer::renderUI(Gui::Widgets &widget) {
+    bool dirty = false;
+
+    dirty |= widget.var("Max bounces", mMaxBounces, 0u, 1u << 16);
+    widget.tooltip("Maximum path length for indirect illumination.\n0 = direct only\n1 = one indirect bounce etc.",
+                   true);
+
+    dirty |= widget.checkbox("Evaluate direct illumination", mComputeDirect);
+    widget.tooltip("Compute direct illumination.\nIf disabled only indirect is computed (when max bounces > 0).", true);
+
+    dirty |= widget.checkbox("Use importance sampling", mUseImportanceSampling);
+    widget.tooltip("Use importance sampling for materials", true);
+
+    // If rendering options that modify the output have changed, set flag to indicate that.
+    // In execute() we will pass the flag to other passes for reset of temporal data etc.
+    if (dirty) {
+        mOptionsChanged = true;
+    }
 }
