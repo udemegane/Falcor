@@ -25,48 +25,71 @@
  # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
-#include "wireframe.h"
+#include "Wireframe.h"
 #include "RenderGraph/RenderPassLibrary.h"
 
-const RenderPass::Info wireframe::kInfo { "wireframe", "Insert pass description here." };
+const RenderPass::Info Wireframe::kInfo{"Wireframe", "Insert pass description here."};
 
 // Don't remove this. it's required for hot-reload to function properly
-extern "C" FALCOR_API_EXPORT const char* getProjDir()
-{
+extern "C" FALCOR_API_EXPORT const char *getProjDir() {
     return PROJECT_DIR;
 }
 
-extern "C" FALCOR_API_EXPORT void getPasses(Falcor::RenderPassLibrary& lib)
-{
-    lib.registerPass(wireframe::kInfo, wireframe::create);
+extern "C" FALCOR_API_EXPORT void getPasses(Falcor::RenderPassLibrary &lib) {
+    lib.registerPass(Wireframe::kInfo, Wireframe::create);
 }
 
-wireframe::SharedPtr wireframe::create(RenderContext* pRenderContext, const Dictionary& dict)
-{
-    SharedPtr pPass = SharedPtr(new wireframe());
+Wireframe::Wireframe() : RenderPass(kInfo) {
+    mpProgram = GraphicsProgram::createFromFile("RenderPasses/Wireframe/Wireframe.3d.slang", "vsMain",
+                                                "psMain");
+    RasterizerState::Desc wireframeDesc;
+    wireframeDesc.setFillMode(RasterizerState::FillMode::Wireframe);
+    wireframeDesc.setCullMode(RasterizerState::CullMode::None);
+    mpRasterState = RasterizerState::create(wireframeDesc);
+
+    mpGraphicsState = GraphicsState::create();
+    mpGraphicsState->setProgram(mpProgram);
+    mpGraphicsState->setRasterizerState(mpRasterState);
+}
+
+void Wireframe::setScene(RenderContext *pRenderContext, const Scene::SharedPtr &pScene) {
+    mpScene = pScene;
+    if (mpScene) {
+        mpProgram->addDefines(mpScene->getSceneDefines());
+    }
+    mpVars = GraphicsVars::create(mpProgram->getReflector());
+}
+
+Wireframe::SharedPtr Wireframe::create(RenderContext *pRenderContext, const Dictionary &dict) {
+    SharedPtr pPass = SharedPtr(new Wireframe());
+
     return pPass;
 }
 
-Dictionary wireframe::getScriptingDictionary()
-{
+Dictionary Wireframe::getScriptingDictionary() {
     return Dictionary();
 }
 
-RenderPassReflection wireframe::reflect(const CompileData& compileData)
-{
+RenderPassReflection Wireframe::reflect(const CompileData &compileData) {
     // Define the required resources here
     RenderPassReflection reflector;
-    //reflector.addOutput("dst");
-    //reflector.addInput("src");
+    reflector.addOutput("output", "wireframe output");
     return reflector;
 }
 
-void wireframe::execute(RenderContext* pRenderContext, const RenderData& renderData)
-{
-    // renderData holds the requested resources
-    // auto& pTexture = renderData.getTexture("src");
+void Wireframe::execute(RenderContext *pRenderContext, const RenderData &renderData) {
+    auto pTargetFbo = Fbo::create({renderData.getTexture("output")});
+    const float4 clearColor(0, 0, 0, 1);
+    pRenderContext->clearFbo(pTargetFbo.get(), clearColor, 1.0f, 0, FboAttachmentType::All);
+    mpGraphicsState->setFbo(pTargetFbo);
+
+    if (mpScene) {
+        // Set render state
+        mpVars["PerFrameCB"]["gColor"] = float4(0, 1, 0, 1);
+
+        mpScene->rasterize(pRenderContext, mpGraphicsState.get(), mpVars.get(), RasterizerState::CullMode::None);
+    }
 }
 
-void wireframe::renderUI(Gui::Widgets& widget)
-{
+void Wireframe::renderUI(Gui::Widgets &widget) {
 }
