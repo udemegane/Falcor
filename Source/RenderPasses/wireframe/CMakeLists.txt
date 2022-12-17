@@ -1,8 +1,8 @@
-add_renderpass(wireframe)
+add_renderpass(Wireframe)
 
-target_sources(wireframe PRIVATE
-    wireframe.cpp
-    wireframe.h
+target_sources(Wireframe PRIVATE
+    Wireframe.cpp
+    Wireframe.h
 )
 
-target_source_group(wireframe "RenderPasses")
+target_source_group(Wireframe "RenderPasses")
