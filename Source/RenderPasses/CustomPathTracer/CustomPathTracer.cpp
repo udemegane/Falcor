@@ -118,7 +118,7 @@ void CustomPathTracer::execute(RenderContext *pRenderContext, const RenderData &
     }
 
     if (mpScene == nullptr) {
-        for (auto cd: kOutputChannels) {
+        for (const auto cd: kOutputChannels) {
             Texture *pDst = renderData.getTexture(cd.name).get();
             if (pDst)pRenderContext->clearTexture(pDst);
         }
