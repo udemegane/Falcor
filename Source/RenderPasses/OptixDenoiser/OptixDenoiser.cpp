@@ -89,7 +89,7 @@ OptixDenoiser_::OptixDenoiser_(const Dictionary& dict)
             mSelectBestMode = false;
         }
         else if (key == kBlend) mDenoiser.params.blendFactor = value;
-        else if (key == kDenoiseAlpha) mDenoiser.params.denoiseAlpha = (value ? 1u : 0u);
+        else if (key == kDenoiseAlpha) mDenoiser.params.denoiseAlpha = value ? OPTIX_DENOISER_ALPHA_MODE_ALPHA_AS_AOV : OPTIX_DENOISER_ALPHA_MODE_COPY;
         else logWarning("Unknown field '{}' in a OptixDenoiser dictionary.", key);
     }
 
@@ -425,7 +425,7 @@ void OptixDenoiser_::renderUI(Gui::Widgets& widget)
             bool denoiseAlpha = mDenoiser.params.denoiseAlpha != 0;
             if (widget.checkbox("Denoise Alpha?", denoiseAlpha))
             {
-                mDenoiser.params.denoiseAlpha = denoiseAlpha ? 1u : 0u;
+                mDenoiser.params.denoiseAlpha = denoiseAlpha ? OPTIX_DENOISER_ALPHA_MODE_ALPHA_AS_AOV : OPTIX_DENOISER_ALPHA_MODE_COPY;
             }
             widget.tooltip("Denoise the alpha channel, not just RGB.");
         }
