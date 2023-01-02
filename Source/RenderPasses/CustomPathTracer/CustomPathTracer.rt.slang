@@ -126,6 +126,99 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayOrigin, const flo
     return sd;
 }
 
+bool traceShadowRay(float3 origin, float3 dir, float distance)
+{
+    RayDesc ray;
+    ray.Origin = origin;
+    ray.Direction = dir;
+    ray.TMin = 0.f;
+    ray.TMax = distance;
+
+    ShadowRayData rayData;
+    rayData.visible = false; // Set to true by miss shader if ray is not terminated before
+    TraceRay(gScene.rtAccel, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, 0xff /* instanceInclusionMask */, 1 /* hitIdx */, rayTypeCount, 1 /* missIdx */, ray, rayData);
+
+    return rayData.visible;
+}
+
+float3 evalDirectAnalytic(const ShadingData sd, const IBSDF bsdf, SampleGenerator sg)
+{
+    const uint lightCount = gScene.getLightCount();
+    if (lightCount == 0)
+        return float3(0.f);
+    const uint lightIndex = min(uint(sampleNext1D(sg) * lightCount), lightCount - 1);
+
+    AnalyticLightSample ls;
+    if (!sampleLight(sd.posW, gScene.getLight(lightIndex), sg, ls))
+        return float3(0.f);
+
+    const uint lobeTypes = bsdf.getLobes(sd);
+    const bool hasReflection = lobeTypes & uint(LobeType::Reflection);
+    const bool hasTransmission = lobeTypes & uint(LobeType::Transmission);
+    if (dot(ls.dir, sd.N) <= kMinCosTheta && !hasTransmission)
+        return float3(0.f);
+    if (dot(ls.dir, sd.N) >= -kMinCosTheta && !hasReflection)
+        return float3(0.f);
+    const float3 n = dot(sd.faceN, ls.dir) >= 0.f ? sd.faceN : -sd.faceN;
+    const float3 origin = computeRayOrigin(sd.posW, n);
+
+    if (!traceShadowRay(origin, ls.dir, ls.distance))
+        return float3(0.f);
+    float invPdf = lightCount;
+    return bsdf.eval(sd, ls.dir, sg) * ls.Li * invPdf;
+}
+
+void generateScatterRay(const ShadingData sd, const IBSDF bsdf, float3 rayOrigin, inout ScatterRayData rayData)
+{
+    BSDFSample bsdfsample;
+    if (bsdf.sample(sd, rayData.sg, bsdfsample, true))
+    {
+        // reinitialize ray
+        rayData.origin = rayOrigin;
+        rayData.direction = bsdfsample.wo;
+        rayData.throughput *= bsdfsample.weight;
+        // rossian rourette
+        if (!any(rayData.throughput > 0.f))
+            rayData.terminated = true;
+    }
+}
+
+float3 evalPrimaryRay(const ShadingData sd, const IBSDF bsdf, inout SampleGenerator sg)
+{
+    return bsdf.getProperties(sd).emission + evalDirectAnalytic(sd, bsdf, sg);
+}
+
+float3 evalScatterRayAll(inout ScatterRayData rayData)
+{
+    RayDesc ray;
+    ray.TMin = 0.f;
+    ray.TMax = kRayMax;
+
+    for (uint depth = 0; depth < kMaxBounces && !rayData.terminated; depth++)
+    {
+        ray.Origin = rayData.origin;
+        ray.Direction = rayData.direction;
+        // uint
+        TraceRay(gScene.rtAccel, 0, 0xff, 0, rayTypeCount, 0, ray, rayData);
+    }
+    return rayData.radiance;
+}
+
+void handleHit(const HitInfo hit, inout ScatterRayData rayData)
+{
+    let lod = ExplicitLodTextureSampler(0.f);
+    ShadingData sd = loadShadingData(hit, rayData.origin, rayData.direction, lod);
+    let bsdf = gScene.materials.getBSDF(sd, lod);
+    float3 rayOrigin = sd.computeNewRayOrigin();
+
+    //  eval hit-point emission contribution except for analytic light
+    //  and do next event estimation with analytic light
+    rayData.radiance = rayData.throughput * (bsdf.getProperties(sd).emission + evalDirectAnalytic(sd, bsdf, rayData.sg));
+    generateScatterRay(sd, bsdf, rayOrigin, rayData);
+    if (rayData.terminated == false)
+        rayData.pathLength++;
+}
+
 // raytracing main function
 float3 tracePath(uint2 pixel, uint2 screen)
 {
@@ -147,23 +240,28 @@ float3 tracePath(uint2 pixel, uint2 screen)
         for (uint i = 0; i < gPRNGDimension; i++)
             sampleNext1D(sg);
 
-        float3 rayOrigin;
-        // ↓これじゃダメなのか？
-        rayOrigin = sd.computeNewRayOrigin();
+        float3 rayOrigin = sd.computeNewRayOrigin();
+        // curve primitive消した
 
-        // if (isCurveHit)
-        // {
-        // } else {
+        outputColor += evalPrimaryRay(sd, bsdf, sg);
 
-        // }
-
-        if (kComputeDirect)
-        {
-        }
+        ScatterRayData rayData = ScatterRayData(sg);
+        generateScatterRay(sd, bsdf, rayOrigin, rayData);
+        outputColor += evalScatterRayAll(rayData);
     }
+    else
+    {
+        outputColor = kUseEnvBackground ? gScene.envMap.eval(primaryRayDir) : kDefaultBackgroundColor;
+    }
+    return outputColor;
 }
 
 // hardware ray tracing shaders
+
+[shader("miss")]
+void scatterMiss(inout ScatterRayData rayData)
+{
+}
 
 [shader("raygeneration")]
 void rayGen()
