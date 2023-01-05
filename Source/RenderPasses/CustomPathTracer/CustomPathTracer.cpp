@@ -54,22 +54,21 @@ namespace {
 
     const ChannelList kInputChannels = {
             {"vbuffer", "gVBuffer", "Visibility buffer"},
-            {kInputViewDir, "gViewW", "World-Space view Direction"},
+            {"viewW", "gViewW", "World-Space view Direction", true},
     };
 
     const ChannelList kOutputChannels = {
-            {"color", "gOutputColor", "out color by raytracing"}
+            {"color", "gOutputColor", "out color by pathtracing", false, ResourceFormat::RGBA32Float}
     };
 
     const char kMaxBounces[] = "maxBounces";
     const char kComputeDirect[] = "computeDirect";
-    const char kDirectOnly[] = "directOnly";
+    // const char kDirectOnly[] = "directOnly";
     const char kUseImportanceSampling[] = "useImportanceSampling";
 }
 
 CustomPathTracer::SharedPtr CustomPathTracer::create(RenderContext *pRenderContext, const Dictionary &dict) {
-    SharedPtr pPass = SharedPtr(new CustomPathTracer(dict));
-    return pPass;
+    return SharedPtr(new CustomPathTracer(dict));
 }
 
 CustomPathTracer::CustomPathTracer(const Dictionary &dict) : RenderPass(kInfo) {
@@ -85,7 +84,7 @@ void CustomPathTracer::parseDictionary(const Dictionary &dict) {
     for (const auto&[key, value]: dict) {
         if (key == kMaxBounces)mMaxBounces = value;
         else if (key == kComputeDirect)mComputeDirect = value;
-        else if (key == kDirectOnly)mDirectOnly = value;
+        // else if (key == kDirectOnly)mDirectOnly = value;
         else if (key == kUseImportanceSampling)mUseImportanceSampling = value;
         else logWarning("Unknown field '{}' in CustomPathTracer dictionary.", key);
     }
@@ -95,7 +94,7 @@ Dictionary CustomPathTracer::getScriptingDictionary() {
     Dictionary d;
     d[kMaxBounces] = mMaxBounces;
     d[kComputeDirect] = mComputeDirect;
-    d[kDirectOnly] = mDirectOnly;
+    // d[kDirectOnly] = mDirectOnly;
     d[kUseImportanceSampling] = mUseImportanceSampling;
     return d;
 }
@@ -117,12 +116,17 @@ void CustomPathTracer::execute(RenderContext *pRenderContext, const RenderData &
         mOptionsChanged = false;
     }
 
-    if (mpScene == nullptr) {
+    if (!mpScene) {
         for (const auto cd: kOutputChannels) {
             Texture *pDst = renderData.getTexture(cd.name).get();
             if (pDst)pRenderContext->clearTexture(pDst);
         }
         return;
+    }
+
+    if (is_set(mpScene->getUpdates(), Scene::UpdateFlags::GeometryChanged))
+    {
+        throw RuntimeError("MinimalPathTracer: This render pass does not support scene geometry changes.");
     }
 
     // シーンの変更を許可しないのはなぜですか？
@@ -140,9 +144,9 @@ void CustomPathTracer::execute(RenderContext *pRenderContext, const RenderData &
     // シェーダーに定数を追加していきますよ。
     mTracer.pProgram->addDefine("MAX_BOUNCES", std::to_string(mMaxBounces));
     mTracer.pProgram->addDefine("COMPUTE_DIRECT", mComputeDirect ? "1" : "0");
-    mTracer.pProgram->addDefine("DIRECT_ONLY", mDirectOnly ? "1" : "0");
-    mTracer.pProgram->addDefine("USE_ANALYTIC_LIGHT", mpScene->useAnalyticLights() ? "1" : "0");
-    mTracer.pProgram->addDefine("USE_EMISSIVE_LIGHT", mpScene->useEmissiveLights() ? "1" : "0");
+    // mTracer.pProgram->addDefine("DIRECT_ONLY", mDirectOnly ? "1" : "0");
+    mTracer.pProgram->addDefine("USE_ANALYTIC_LIGHTS", mpScene->useAnalyticLights() ? "1" : "0");
+    mTracer.pProgram->addDefine("USE_EMISSIVE_LIGHTS", mpScene->useEmissiveLights() ? "1" : "0");
     mTracer.pProgram->addDefine("USE_ENV_LIGHT", mpScene->useEnvLight() ? "1" : "0");
     mTracer.pProgram->addDefine("USE_ENV_BACKGROUND", mpScene->useEnvBackground() ? "1" : "0");
 
@@ -162,7 +166,7 @@ void CustomPathTracer::execute(RenderContext *pRenderContext, const RenderData &
         }
     };
     for (auto channel: kInputChannels) bind(channel);
-    for (auto channel: kOutputChannels)bind(channel);
+    for (auto channel: kOutputChannels) bind(channel);
 
     const uint2 targetDim = renderData.getDefaultTextureDims();
     FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
@@ -188,7 +192,7 @@ void CustomPathTracer::prepareVars() {
 void CustomPathTracer::setScene(RenderContext *pRenderContext, const Scene::SharedPtr &pScene) {
     mTracer.pProgram = nullptr;
     mTracer.pBindingTable = nullptr;
-    mTracer.pVars;
+    mTracer.pVars= nullptr;
     mFrameCount = 0;
     mpScene = pScene;
     if (!mpScene) return;
@@ -211,7 +215,7 @@ void CustomPathTracer::setScene(RenderContext *pRenderContext, const Scene::Shar
 
     if (mpScene->hasGeometryType(Scene::GeometryType::TriangleMesh)) {
         sbt->setHitGroup(0, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh),
-                         desc.addHitGroup("scatterTriangleMeshClosestHit", "scatterTriangelMeshAnyHit"));
+                         desc.addHitGroup("scatterTriangleMeshClosestHit", "scatterTriangleMeshAnyHit"));
         sbt->setHitGroup(1, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh),
                          desc.addHitGroup("", "shadowTriangleMeshAnyHit"));
     }
