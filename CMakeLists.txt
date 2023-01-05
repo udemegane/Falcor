@@ -19,7 +19,6 @@ project(Falcor
 set(FALCOR_RENDER_BACKEND D3D12 CACHE STRING "Falcor rendering backend")
 set_property(CACHE FALCOR_RENDER_BACKEND PROPERTY STRINGS D3D12 GFX-D3D12 GFX-VK)
 
-
 # Header validation.
 # If enabled, additional targets are generated to validate that headers are self sufficient.
 set(FALCOR_VALIDATE_HEADERS OFF CACHE BOOL "Enable header validation")
@@ -45,7 +44,6 @@ endif()
 # -----------------------------------------------------------------------------
 # Check platform
 # -----------------------------------------------------------------------------
-
 if(${CMAKE_SYSTEM_NAME} MATCHES "Window")
     set(FALCOR_PLATFORM "Windows")
     set(FALCOR_WINDOWS TRUE)
@@ -55,12 +53,12 @@ elseif(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
 else()
     message(FATAL_ERROR "Unsupported platform!")
 endif()
+
 message(STATUS "Platform: ${FALCOR_PLATFORM}")
 
 # -----------------------------------------------------------------------------
 # git submodules
 # -----------------------------------------------------------------------------
-
 if(NOT EXISTS ${CMAKE_SOURCE_DIR}/external/pybind11/CMakeLists.txt)
     message(STATUS "Updating git submodules ...")
     find_package(Git REQUIRED)
@@ -79,7 +77,6 @@ endif()
 # on these dependencies being available. We also add additional targets to pull
 # the dependencies when the project is built such that they are updated automatically
 # if the manifest files change.
-
 if(FALCOR_WINDOWS)
     set(PACKMAN "${CMAKE_SOURCE_DIR}/tools/packman/packman.cmd")
     set(PACKMAN_PLATFORM "windows-x86_64")
@@ -108,20 +105,20 @@ if(FALCOR_LINUX)
     set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
 endif()
 
-
 # -----------------------------------------------------------------------------
 # CUDA
 # -----------------------------------------------------------------------------
 
-
 # Set default CUDA architecture to 75 (Turing).
 # This can be overwritten for individual targets using the CUDA_ARCHITECTURE property.
 if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-  set(CMAKE_CUDA_ARCHITECTURES 75-virtual)
+    set(CMAKE_CUDA_ARCHITECTURES 75-virtual)
 endif()
 
 include(CheckLanguage)
 check_language(CUDA)
+set(CMAKE_CUDA_COMPILER 0)
+
 if(CMAKE_CUDA_COMPILER)
     message(STATUS "Enabling CUDA support.")
     enable_language(CUDA)
@@ -134,7 +131,6 @@ endif()
 # -----------------------------------------------------------------------------
 # External dependencies
 # -----------------------------------------------------------------------------
-
 add_subdirectory(external)
 
 message(STATUS "Feature flags:")
@@ -156,6 +152,7 @@ message(STATUS "FALCOR_HAS_MDL_SDK: ${FALCOR_HAS_MDL_SDK}")
 
 # Require builds to be outside of source tree.
 file(TO_CMAKE_PATH "${PROJECT_BINARY_DIR}/CMakeLists.txt" LOC_PATH)
+
 if(EXISTS "${LOC_PATH}")
     message(FATAL_ERROR "You cannot build in a source directory (or any directory with a CMakeLists.txt file). Please use a build directory instead.")
 endif()
@@ -192,7 +189,6 @@ set(FALCOR_DATA_OUTPUT_DIRECTORY ${FALCOR_OUTPUT_DIRECTORY}/Data)
 # -----------------------------------------------------------------------------
 # Packman dependencies
 # -----------------------------------------------------------------------------
-
 add_custom_target(packman_dependencies DEPENDS packman_dependencies_stamp)
 set_target_properties(packman_dependencies PROPERTIES FOLDER "Misc")
 add_custom_command(
@@ -317,7 +313,6 @@ endfunction()
 # We currently use the legacy batch files for deploying additional binaries.
 # TODO: This should be replaced with a better approach allowing individual
 # targets to deploy dependencies.
-
 set(source_dir ${CMAKE_SOURCE_DIR})
 set(output_dir ${FALCOR_OUTPUT_DIRECTORY})
 file(TO_NATIVE_PATH ${source_dir} source_dir)
@@ -332,8 +327,8 @@ elseif(FALCOR_LINUX)
         COMMAND ${CMAKE_SOURCE_DIR}/build_scripts/deploycommon.sh ${source_dir} ${output_dir} $<CONFIG>
     )
 endif()
-set_target_properties(deploy_dependencies PROPERTIES FOLDER "Misc")
 
+set_target_properties(deploy_dependencies PROPERTIES FOLDER "Misc")
 
 # -----------------------------------------------------------------------------
 # Header validation
@@ -356,6 +351,7 @@ function(validate_headers target)
     # Copy properties from original target.
     foreach(property INCLUDE_DIRECTORIES LINK_LIBRARIES COMPILE_DEFINITIONS COMPILE_FEATURES)
         get_target_property(value ${target} ${property})
+
         # message(STATUS "${property}: ${value}")
         if(value)
             set_property(TARGET ${validate_target} PROPERTY ${property} ${value})
@@ -371,6 +367,7 @@ function(validate_headers target)
 
     # Create a list of CPP files, each including one header.
     set(validate_sources "")
+
     foreach(file ${sources})
         if(${file} MATCHES "^[^.][^.].*\\.h$")
             # message(STATUS ${file})
@@ -389,7 +386,6 @@ endfunction()
 # -----------------------------------------------------------------------------
 # Ninja log analyzer
 # -----------------------------------------------------------------------------
-
 if(${CMAKE_GENERATOR} MATCHES "Ninja")
     add_custom_target(ninja_log_analyzer ALL
         COMMAND ${CMAKE_SOURCE_DIR}/tools/.packman/python/python ${CMAKE_SOURCE_DIR}/tools/ninja_log_analyzer.py ${CMAKE_CURRENT_BINARY_DIR}/.ninja_log -c 10
@@ -401,7 +397,6 @@ endif()
 # -----------------------------------------------------------------------------
 # Project sources
 # -----------------------------------------------------------------------------
-
 add_subdirectory(Source/Falcor)
 add_subdirectory(Source/Mogwai)
 add_subdirectory(Source/RenderPasses)
@@ -413,6 +408,7 @@ add_dependencies(Falcor deploy_dependencies)
 
 # Make Mogwai depend on all render passes to have them built prior to running Mogwai.
 get_property(renderpass_targets GLOBAL PROPERTY FALCOR_RENDERPASS_TARGETS)
+
 if(renderpass_targets)
     add_dependencies(Mogwai ${renderpass_targets})
 endif()
