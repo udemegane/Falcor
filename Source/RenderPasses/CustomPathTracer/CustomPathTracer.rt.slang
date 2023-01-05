@@ -191,12 +191,12 @@ float3 evalPrimaryRay(const ShadingData sd, const IBSDF bsdf, inout SampleGenera
 
 float3 evalScatterRayAll(inout ScatterRayData rayData)
 {
-    RayDesc ray;
-    ray.TMin = 0.f;
-    ray.TMax = kRayMax;
 
-    for (uint depth = 0; depth < kMaxBounces && !rayData.terminated; depth++)
+    for (uint depth = 0; depth <= kMaxBounces && !rayData.terminated; depth++)
     {
+        RayDesc ray;
+        ray.TMin = 0.f;
+        ray.TMax = kRayMax;
         ray.Origin = rayData.origin;
         ray.Direction = rayData.direction;
         // uint
@@ -214,7 +214,7 @@ void handleHit(const HitInfo hit, inout ScatterRayData rayData)
 
     //  eval hit-point emission contribution except for analytic light
     //  and do next event estimation with analytic light
-    rayData.radiance = rayData.throughput * (bsdf.getProperties(sd).emission + evalDirectAnalytic(sd, bsdf, rayData.sg));
+    rayData.radiance += rayData.throughput * (bsdf.getProperties(sd).emission + evalDirectAnalytic(sd, bsdf, rayData.sg));
     generateScatterRay(sd, bsdf, rayOrigin, rayData);
     if (rayData.terminated == false)
         rayData.pathLength++;
