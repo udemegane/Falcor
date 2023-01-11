@@ -26,12 +26,12 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #pragma once
+
 #include "Falcor.h"
 
 using namespace Falcor;
 
-class Wireframe : public RenderPass
-{
+class Wireframe : public RenderPass {
 public:
     using SharedPtr = std::shared_ptr<Wireframe>;
 
@@ -45,19 +45,28 @@ public:
     static SharedPtr create(RenderContext *pRenderContext = nullptr, const Dictionary &dict = {});
 
     virtual Dictionary getScriptingDictionary() override;
+
     virtual RenderPassReflection reflect(const CompileData &compileData) override;
+
     virtual void compile(RenderContext *pRenderContext, const CompileData &compileData) override {}
+
     virtual void execute(RenderContext *pRenderContext, const RenderData &renderData) override;
+
     virtual void renderUI(Gui::Widgets &widget) override;
-    virtual void setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene) override;
+
+    virtual void setScene(RenderContext *pRenderContext, const Scene::SharedPtr &pScene) override;
+
     virtual bool onMouseEvent(const MouseEvent &mouseEvent) override { return false; }
+
     virtual bool onKeyEvent(const KeyboardEvent &keyEvent) override { return false; }
 
 private:
     Wireframe();
-    Scene::SharedPtr mpScene;
-    GraphicsProgram::SharedPtr mpProgram;
-    GraphicsState::SharedPtr mpGraphicsState;
-    RasterizerState::SharedPtr mpRasterState;
-    GraphicsVars::SharedPtr mpVars;
+
+    Scene::SharedPtr mpScene = nullptr;
+    GraphicsProgram::SharedPtr mpProgram = nullptr;
+    DepthStencilState::SharedPtr mpNoDepthDS = nullptr;
+    GraphicsState::SharedPtr mpGraphicsState = nullptr;
+    RasterizerState::SharedPtr mpRasterState = nullptr;
+    GraphicsVars::SharedPtr mpVars = nullptr;
 };
