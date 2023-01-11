@@ -47,10 +47,6 @@ Wireframe::Wireframe() : RenderPass(kInfo) {
     wireframeDesc.setCullMode(RasterizerState::CullMode::None);
     mpRasterState = RasterizerState::create(wireframeDesc);
 
-    DepthStencilState::Desc dsDesc;
-    dsDesc.setDepthEnabled(false);
-    mpNoDepthDS = DepthStencilState::create(dsDesc);
-
     mpGraphicsState = GraphicsState::create();
     mpGraphicsState->setProgram(mpProgram);
     mpGraphicsState->setRasterizerState(mpRasterState);
@@ -86,7 +82,6 @@ void Wireframe::execute(RenderContext *pRenderContext, const RenderData &renderD
     const float4 clearColor(0, 0, 0, 1);
     pRenderContext->clearFbo(pTargetFbo.get(), clearColor, 1.0f, 0, FboAttachmentType::All);
     mpGraphicsState->setFbo(pTargetFbo);
-    mpGraphicsState->setDepthStencilState(mpNoDepthDS);
     if (mpScene) {
         // Set render state
         mpVars["PerFrameCB"]["gColor"] = float4(0, 1, 0, 1);

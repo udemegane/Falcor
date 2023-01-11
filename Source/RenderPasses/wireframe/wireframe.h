@@ -65,7 +65,6 @@ private:
 
     Scene::SharedPtr mpScene = nullptr;
     GraphicsProgram::SharedPtr mpProgram = nullptr;
-    DepthStencilState::SharedPtr mpNoDepthDS = nullptr;
     GraphicsState::SharedPtr mpGraphicsState = nullptr;
     RasterizerState::SharedPtr mpRasterState = nullptr;
     GraphicsVars::SharedPtr mpVars = nullptr;
