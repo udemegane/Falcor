@@ -19,3 +19,6 @@
 [submodule "external/tiny-cuda-nn"]
 	path = external/tiny-cuda-nn
 	url = https://github.com/NVlabs/tiny-cuda-nn.git
+[submodule "Source/RenderPasses/Falcor-playground"]
+	path = Source/RenderPasses/Falcor-playground
+	url = https://github.com/udemegane/Falcor-playground.git
