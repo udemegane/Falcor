@@ -2,7 +2,7 @@ import sys
 import argparse
 from pathlib import Path
 
-RENDER_PASSES_DIR = Path(sys.argv[0]).parent.parent / "Source" / "RenderPasses"
+RENDER_PASSES_DIR = Path(sys.argv[0]).parent.parent / "Source" / "RenderPasses" / "Falcor-playground"
 EXCLUDE_EXT = []
 TEMPLATE_NAME = 'PassLibraryTemplate'
 
