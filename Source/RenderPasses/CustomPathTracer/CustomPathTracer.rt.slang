@@ -176,11 +176,20 @@ void generateScatterRay(const ShadingData sd, const IBSDF bsdf, float3 rayOrigin
     {
         // reinitialize ray
         rayData.origin = rayOrigin;
+        if (bsdfsample.isLobe(LobeType::Transmission))
+        {
+            rayData.origin = sd.computeNewRayOrigin(false);
+        }
         rayData.direction = bsdfsample.wo;
         rayData.throughput *= bsdfsample.weight;
         // rossian rourette
         if (!any(rayData.throughput > 0.f))
             rayData.terminated = true;
+    }
+    else
+    {
+        // これないとenvmapの参照が増えておかしなことに
+        rayData.terminated = true;
     }
 }
 
@@ -202,7 +211,8 @@ float3 evalScatterRayAll(inout ScatterRayData rayData)
         // uint
         TraceRay(gScene.rtAccel, 0, 0xff, 0, rayTypeCount, 0, ray, rayData);
     }
-    return rayData.radiance;
+    float3 lr = rayData.radiance;
+    return lr;
 }
 
 void handleHit(const HitInfo hit, inout ScatterRayData rayData)
@@ -210,11 +220,26 @@ void handleHit(const HitInfo hit, inout ScatterRayData rayData)
     let lod = ExplicitLodTextureSampler(0.f);
     ShadingData sd = loadShadingData(hit, rayData.origin, rayData.direction, lod);
     let bsdf = gScene.materials.getBSDF(sd, lod);
-    float3 rayOrigin = sd.computeNewRayOrigin();
+    float3 rayOrigin;
 
     //  eval hit-point emission contribution except for analytic light
     //  and do next event estimation with analytic light
-    rayData.radiance += rayData.throughput * (bsdf.getProperties(sd).emission + evalDirectAnalytic(sd, bsdf, rayData.sg));
+    rayData.radiance += rayData.throughput * (bsdf.getProperties(sd).emission);
+    if (rayData.pathLength >= kMaxBounces)
+    {
+        rayData.terminated = true;
+        return;
+    }
+    rayData.radiance += rayData.throughput * evalDirectAnalytic(sd, bsdf, rayData.sg);
+    if (hit.getType() == HitType::Curve)
+    {
+        // For curves, we set the new origin at the sphere center.
+        rayOrigin = sd.posW - sd.curveRadius * sd.N;
+    }
+    else
+    {
+        rayOrigin = sd.computeNewRayOrigin();
+    }
     generateScatterRay(sd, bsdf, rayOrigin, rayData);
     if (rayData.terminated == false)
         rayData.pathLength++;
@@ -223,7 +248,7 @@ void handleHit(const HitInfo hit, inout ScatterRayData rayData)
 // raytracing main function
 float3 tracePath(uint2 pixel, uint2 screen)
 {
-    float3 outputColor = float3(0, 0, 0);
+    float3 outputColor = float3(0.f);
 
     const float3 primaryRayDir = getPrimaryRayDir(pixel, screen, gScene.camera);
     const float3 primaryRayOrigin = gScene.camera.getPosition();
