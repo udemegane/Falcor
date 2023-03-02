@@ -1,6 +1,6 @@
 # Build folder.
 /build/
-
+/cmake-build-debug/
 # Test output folder.
 /tests/data/
 
@@ -14,6 +14,7 @@
 # IDE folders.
 /.vs/
 /.vscode/
+/.idea/
 
 # User files.
 /CMakeUserPresets.json
