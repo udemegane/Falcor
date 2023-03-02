@@ -30,25 +30,25 @@
 
 namespace
 {
-    // Names for pass input and output textures
-    const char kColorInput[] = "color";
-    const char kAlbedoInput[] = "albedo";
-    const char kNormalInput[] = "normal";
-    const char kMotionInput[] = "mvec";
-    const char kOutput[] = "output";
+// Names for pass input and output textures
+const char kColorInput[] = "color";
+const char kAlbedoInput[] = "albedo";
+const char kNormalInput[] = "normal";
+const char kMotionInput[] = "mvec";
+const char kOutput[] = "output";
 
-    // Names for configuration options available in Python
-    const char kEnabled[] = "enabled";
-    const char kBlend[] = "blend";
-    const char kModel[] = "model";
-    const char kDenoiseAlpha[] = "denoiseAlpha";
+// Names for configuration options available in Python
+const char kEnabled[] = "enabled";
+const char kBlend[] = "blend";
+const char kModel[] = "model";
+const char kDenoiseAlpha[] = "denoiseAlpha";
 
-    // Locations of shaders used to (re-)format data as needed by OptiX
-    const std::string kConvertTexToBufFile = "RenderPasses/OptixDenoiser/ConvertTexToBuf.cs.slang";
-    const std::string kConvertNormalsToBufFile = "RenderPasses/OptixDenoiser/ConvertNormalsToBuf.cs.slang";
-    const std::string kConvertMotionVecFile = "RenderPasses/OptixDenoiser/ConvertMotionVectorInputs.cs.slang";
-    const std::string kConvertBufToTexFile = "RenderPasses/OptixDenoiser/ConvertBufToTex.ps.slang";
-};
+// Locations of shaders used to (re-)format data as needed by OptiX
+const std::string kConvertTexToBufFile = "RenderPasses/OptixDenoiser/ConvertTexToBuf.cs.slang";
+const std::string kConvertNormalsToBufFile = "RenderPasses/OptixDenoiser/ConvertNormalsToBuf.cs.slang";
+const std::string kConvertMotionVecFile = "RenderPasses/OptixDenoiser/ConvertMotionVectorInputs.cs.slang";
+const std::string kConvertBufToTexFile = "RenderPasses/OptixDenoiser/ConvertBufToTex.ps.slang";
+}; // namespace
 
 static void regOptixDenoiser(pybind11::module& m)
 {
@@ -68,20 +68,25 @@ extern "C" FALCOR_API_EXPORT void registerPlugin(Falcor::PluginRegistry& registr
     ScriptBindings::registerBinding(regOptixDenoiser);
 }
 
-OptixDenoiser_::OptixDenoiser_(std::shared_ptr<Device> pDevice, const Dictionary& dict)
-    : RenderPass(std::move(pDevice))
+OptixDenoiser_::OptixDenoiser_(std::shared_ptr<Device> pDevice, const Dictionary& dict) : RenderPass(std::move(pDevice))
 {
     for (const auto& [key, value] : dict)
     {
-        if (key == kEnabled) mEnabled = value;
+        if (key == kEnabled)
+            mEnabled = value;
         else if (key == kModel)
         {
             mDenoiser.modelKind = value;
             mSelectBestMode = false;
         }
-        else if (key == kBlend) mDenoiser.params.blendFactor = value;
-        else if (key == kDenoiseAlpha) mDenoiser.params.denoiseAlpha = (value ? 1u : 0u);
-        else logWarning("Unknown field '{}' in a OptixDenoiser dictionary.", key);
+        else if (key == kBlend)
+            mDenoiser.params.blendFactor = value;
+        else if (key == kDenoiseAlpha)
+            mDenoiser.params.denoiseAlpha =
+                (value ? OptixDenoiserAlphaMode::OPTIX_DENOISER_ALPHA_MODE_ALPHA_AS_AOV
+                       : OptixDenoiserAlphaMode::OPTIX_DENOISER_ALPHA_MODE_COPY);
+        else
+            logWarning("Unknown field '{}' in a OptixDenoiser dictionary.", key);
     }
 
     mpConvertTexToBuf = ComputePass::create(mpDevice, kConvertTexToBufFile, "main");
@@ -145,9 +150,8 @@ void OptixDenoiser_::compile(RenderContext* pRenderContext, const CompileData& c
     // If the user specified a denoiser on initialization, respect that.  Otherwise, choose the "best"
     if (mSelectBestMode)
     {
-        auto best = mHasMotionInput
-            ? OptixDenoiserModelKind::OPTIX_DENOISER_MODEL_KIND_TEMPORAL
-            : OptixDenoiserModelKind::OPTIX_DENOISER_MODEL_KIND_HDR;
+        auto best = mHasMotionInput ? OptixDenoiserModelKind::OPTIX_DENOISER_MODEL_KIND_TEMPORAL
+                                    : OptixDenoiserModelKind::OPTIX_DENOISER_MODEL_KIND_HDR;
 
         mSelectedModel = best;
         mDenoiser.modelKind = best;
@@ -155,11 +159,11 @@ void OptixDenoiser_::compile(RenderContext* pRenderContext, const CompileData& c
 
     // Create a dropdown menu for selecting the denoising mode
     mModelChoices = {};
-    mModelChoices.push_back({ OPTIX_DENOISER_MODEL_KIND_LDR, "LDR denoising" });
-    mModelChoices.push_back({ OPTIX_DENOISER_MODEL_KIND_HDR, "HDR denoising" });
+    mModelChoices.push_back({OPTIX_DENOISER_MODEL_KIND_LDR, "LDR denoising"});
+    mModelChoices.push_back({OPTIX_DENOISER_MODEL_KIND_HDR, "HDR denoising"});
     if (mHasMotionInput)
     {
-        mModelChoices.push_back({ OPTIX_DENOISER_MODEL_KIND_TEMPORAL, "Temporal denoising" });
+        mModelChoices.push_back({OPTIX_DENOISER_MODEL_KIND_TEMPORAL, "Temporal denoising"});
     }
 
     // (Re-)allocate temporary buffers when render resolution changes
@@ -177,8 +181,10 @@ void OptixDenoiser_::compile(RenderContext* pRenderContext, const CompileData& c
     }
 
     // Size intensity and hdrAverage buffers correctly.  Only one at a time is used, but these are small, so create them both
-    if (mDenoiser.intensityBuffer.getSize() != (1 * sizeof(float))) mDenoiser.intensityBuffer.resize(1 * sizeof(float));
-    if (mDenoiser.hdrAverageBuffer.getSize() != (3 * sizeof(float))) mDenoiser.hdrAverageBuffer.resize(3 * sizeof(float));
+    if (mDenoiser.intensityBuffer.getSize() != (1 * sizeof(float)))
+        mDenoiser.intensityBuffer.resize(1 * sizeof(float));
+    if (mDenoiser.hdrAverageBuffer.getSize() != (3 * sizeof(float)))
+        mDenoiser.hdrAverageBuffer.resize(3 * sizeof(float));
 
     // Create an intensity GPU buffer to pass to OptiX when appropriate
     if (!mDenoiser.kernelPredictionMode || !mDenoiser.useAOVs)
@@ -186,7 +192,7 @@ void OptixDenoiser_::compile(RenderContext* pRenderContext, const CompileData& c
         mDenoiser.params.hdrIntensity = mDenoiser.intensityBuffer.getDevicePtr();
         mDenoiser.params.hdrAverageColor = static_cast<CUdeviceptr>(0);
     }
-    else  // Create an HDR average color GPU buffer to pass to OptiX when appropriate
+    else // Create an HDR average color GPU buffer to pass to OptiX when appropriate
     {
         mDenoiser.params.hdrIntensity = static_cast<CUdeviceptr>(0);
         mDenoiser.params.hdrAverageColor = mDenoiser.hdrAverageBuffer.getDevicePtr();
@@ -246,12 +252,15 @@ void OptixDenoiser_::allocateStagingBuffer(RenderContext* pRenderContext, Intero
     }
 
     // If we had an existing buffer in this location, free it.
-    if (interop.devicePtr) freeSharedDevicePtr((void*)interop.devicePtr);
+    if (interop.devicePtr)
+        freeSharedDevicePtr((void*)interop.devicePtr);
 
     // Create a new DX <-> CUDA shared buffer using the Falcor API to create, then find its CUDA pointer.
-    interop.buffer = Buffer::createTyped(mpDevice.get(), falcorFormat,
-        mBufferSize.x * mBufferSize.y,
-        Resource::BindFlags::ShaderResource | Resource::BindFlags::UnorderedAccess | Resource::BindFlags::RenderTarget | Resource::BindFlags::Shared);
+    interop.buffer = Buffer::createTyped(
+        mpDevice.get(), falcorFormat, mBufferSize.x * mBufferSize.y,
+        Resource::BindFlags::ShaderResource | Resource::BindFlags::UnorderedAccess | Resource::BindFlags::RenderTarget |
+            Resource::BindFlags::Shared
+    );
     interop.devicePtr = (CUdeviceptr)exportBufferToCudaDevice(interop.buffer);
 
     // Setup an OptiXImage2D structure so OptiX will used this new buffer for image data
@@ -267,7 +276,8 @@ void OptixDenoiser_::freeStagingBuffer(Interop& interop, OptixImage2D& image)
 {
     // Free the CUDA memory for this buffer, then set our other references to it to NULL to avoid
     // accidentally trying to access the freed memory.
-    if (interop.devicePtr) freeSharedDevicePtr((void*)interop.devicePtr);
+    if (interop.devicePtr)
+        freeSharedDevicePtr((void*)interop.devicePtr);
     interop.buffer = nullptr;
     image.data = static_cast<CUdeviceptr>(0);
 }
@@ -301,7 +311,10 @@ void OptixDenoiser_::execute(RenderContext* pRenderContext, const RenderData& re
         }
         if (mHasNormalInput && mDenoiser.options.guideNormal)
         {
-            convertNormalsToBuf(pRenderContext, renderData.getTexture(kNormalInput), mDenoiser.interop.normal.buffer, mBufferSize, rmcv::transpose(rmcv::inverse(mpScene->getCamera()->getViewMatrix())));
+            convertNormalsToBuf(
+                pRenderContext, renderData.getTexture(kNormalInput), mDenoiser.interop.normal.buffer, mBufferSize,
+                rmcv::transpose(rmcv::inverse(mpScene->getCamera()->getViewMatrix()))
+            );
         }
         if (mHasMotionInput && mDenoiser.modelKind == OptixDenoiserModelKind::OPTIX_DENOISER_MODEL_KIND_TEMPORAL)
         {
@@ -317,9 +330,7 @@ void OptixDenoiser_::execute(RenderContext* pRenderContext, const RenderData& re
             optixDenoiserComputeIntensity(
                 mDenoiser.denoiser,
                 nullptr, // CUDA stream
-                &mDenoiser.layer.input,
-                mDenoiser.params.hdrIntensity,
-                mDenoiser.scratchBuffer.getDevicePtr(),
+                &mDenoiser.layer.input, mDenoiser.params.hdrIntensity, mDenoiser.scratchBuffer.getDevicePtr(),
                 mDenoiser.scratchBuffer.getSize()
             );
         }
@@ -330,9 +341,7 @@ void OptixDenoiser_::execute(RenderContext* pRenderContext, const RenderData& re
             optixDenoiserComputeAverageColor(
                 mDenoiser.denoiser,
                 nullptr, // CUDA stream
-                &mDenoiser.layer.input,
-                mDenoiser.params.hdrAverageColor,
-                mDenoiser.scratchBuffer.getDevicePtr(),
+                &mDenoiser.layer.input, mDenoiser.params.hdrAverageColor, mDenoiser.scratchBuffer.getDevicePtr(),
                 mDenoiser.scratchBuffer.getSize()
             );
         }
@@ -345,16 +354,17 @@ void OptixDenoiser_::execute(RenderContext* pRenderContext, const RenderData& re
         }
 
         // Run denoiser
-        optixDenoiserInvoke(mDenoiser.denoiser,
-            nullptr,                 // CUDA stream
-            &mDenoiser.params,
-            mDenoiser.stateBuffer.getDevicePtr(), mDenoiser.stateBuffer.getSize(),
-            &mDenoiser.guideLayer,   // Our set of normal / albedo / motion vector guides
-            &mDenoiser.layer,        // Array of input or AOV layers (also contains denoised per-layer outputs)
-            1u,                      // Nuumber of layers in the above array
-            0u,                      // (Tile) Input offset X
-            0u,                      // (Tile) Input offset Y
-            mDenoiser.scratchBuffer.getDevicePtr(), mDenoiser.scratchBuffer.getSize());
+        optixDenoiserInvoke(
+            mDenoiser.denoiser,
+            nullptr, // CUDA stream
+            &mDenoiser.params, mDenoiser.stateBuffer.getDevicePtr(), mDenoiser.stateBuffer.getSize(),
+            &mDenoiser.guideLayer, // Our set of normal / albedo / motion vector guides
+            &mDenoiser.layer,      // Array of input or AOV layers (also contains denoised per-layer outputs)
+            1u,                    // Nuumber of layers in the above array
+            0u,                    // (Tile) Input offset X
+            0u,                    // (Tile) Input offset Y
+            mDenoiser.scratchBuffer.getDevicePtr(), mDenoiser.scratchBuffer.getSize()
+        );
 
         // Copy denoised output buffer to texture for Falcor to consume
         convertBufToTex(pRenderContext, mDenoiser.interop.denoiserOutput.buffer, renderData.getTexture(kOutput), mBufferSize);
@@ -388,7 +398,10 @@ void OptixDenoiser_::renderUI(Gui::Widgets& widget)
             mDenoiser.modelKind = static_cast<OptixDenoiserModelKind>(mSelectedModel);
             mRecreateDenoiser = true;
         }
-        widget.tooltip("Selects the OptiX denosing model.  See OptiX documentation for details.\n\nFor best results:\n   LDR assumes inputs [0..1]\n   HDR assumes inputs [0..10,000]");
+        widget.tooltip(
+            "Selects the OptiX denosing model.  See OptiX documentation for details.\n\nFor best results:\n   LDR assumes inputs [0..1]\n  "
+            " HDR assumes inputs [0..10,000]"
+        );
 
         if (mHasAlbedoInput)
         {
@@ -403,20 +416,24 @@ void OptixDenoiser_::renderUI(Gui::Widgets& widget)
 
         if (mHasNormalInput)
         {
-            bool useNormalGuide = mDenoiser.options.guideNormal != 0u;
+            bool useNormalGuide = mDenoiser.options.guideNormal != OptixDenoiserAlphaMode::OPTIX_DENOISER_ALPHA_MODE_COPY;
             if (widget.checkbox("Use normal guide?", useNormalGuide))
             {
                 mDenoiser.options.guideNormal = useNormalGuide ? 1u : 0u;
                 mRecreateDenoiser = true;
             }
-            widget.tooltip("Use input, noise-free normal buffer to help guide denoising.  (Note: The Optix 7.3 API is unclear on this point, but, correct use of normal guides appears to also require using an albedo guide.)");
+            widget.tooltip(
+                "Use input, noise-free normal buffer to help guide denoising.  (Note: The Optix 7.3 API is unclear on this point, but, "
+                "correct use of normal guides appears to also require using an albedo guide.)"
+            );
         }
 
         {
             bool denoiseAlpha = mDenoiser.params.denoiseAlpha != 0;
             if (widget.checkbox("Denoise Alpha?", denoiseAlpha))
             {
-                mDenoiser.params.denoiseAlpha = denoiseAlpha ? 1u : 0u;
+                mDenoiser.params.denoiseAlpha = denoiseAlpha ? OptixDenoiserAlphaMode::OPTIX_DENOISER_ALPHA_MODE_COPY
+                                                             : OptixDenoiserAlphaMode::OPTIX_DENOISER_ALPHA_MODE_ALPHA_AS_AOV;
             }
             widget.tooltip("Denoise the alpha channel, not just RGB.");
         }
@@ -426,12 +443,12 @@ void OptixDenoiser_::renderUI(Gui::Widgets& widget)
     }
 }
 
-
 // Basically a wrapper to handle null Falcor Buffers gracefully, which couldn't
 // happen in getShareDevicePtr(), due to the bootstrapping that avoids namespace conflicts
-void * OptixDenoiser_::exportBufferToCudaDevice(Buffer::SharedPtr &buf)
+void* OptixDenoiser_::exportBufferToCudaDevice(Buffer::SharedPtr& buf)
 {
-    if (buf == nullptr) return nullptr;
+    if (buf == nullptr)
+        return nullptr;
     return getSharedDevicePtr(buf->getSharedApiHandle(), (uint32_t)buf->getSize());
 }
 
@@ -453,10 +470,7 @@ void OptixDenoiser_::setupDenoiser()
     }
 
     // Create the denoiser
-    optixDenoiserCreate(mOptixContext,
-        mDenoiser.modelKind,
-        &mDenoiser.options,
-        &mDenoiser.denoiser);
+    optixDenoiserCreate(mOptixContext, mDenoiser.modelKind, &mDenoiser.options, &mDenoiser.denoiser);
 
     // Find out how much memory is needed for the requested denoiser
     optixDenoiserComputeMemoryResources(mDenoiser.denoiser, mDenoiser.tileWidth, mDenoiser.tileHeight, &mDenoiser.sizes);
@@ -466,15 +480,21 @@ void OptixDenoiser_::setupDenoiser()
     mDenoiser.stateBuffer.resize(mDenoiser.sizes.stateSizeInBytes);
 
     // Finish setup of the denoiser
-    optixDenoiserSetup(mDenoiser.denoiser,
-        nullptr,
-        mDenoiser.tileWidth + 2 * mDenoiser.tileOverlap,   // Should work with tiling if parameters set appropriately
-        mDenoiser.tileHeight + 2 * mDenoiser.tileOverlap,  // Should work with tiling if parameters set appropriately
-        mDenoiser.stateBuffer.getDevicePtr(), mDenoiser.stateBuffer.getSize(),
-        mDenoiser.scratchBuffer.getDevicePtr(), mDenoiser.scratchBuffer.getSize());
+    optixDenoiserSetup(
+        mDenoiser.denoiser, nullptr,
+        mDenoiser.tileWidth + 2 * mDenoiser.tileOverlap,  // Should work with tiling if parameters set appropriately
+        mDenoiser.tileHeight + 2 * mDenoiser.tileOverlap, // Should work with tiling if parameters set appropriately
+        mDenoiser.stateBuffer.getDevicePtr(), mDenoiser.stateBuffer.getSize(), mDenoiser.scratchBuffer.getDevicePtr(),
+        mDenoiser.scratchBuffer.getSize()
+    );
 }
 
-void OptixDenoiser_::convertMotionVectors(RenderContext* pRenderContext, const Texture::SharedPtr& tex, const Buffer::SharedPtr& buf, const uint2& size)
+void OptixDenoiser_::convertMotionVectors(
+    RenderContext* pRenderContext,
+    const Texture::SharedPtr& tex,
+    const Buffer::SharedPtr& buf,
+    const uint2& size
+)
 {
     auto vars = mpConvertMotionVectors->getVars();
     vars["GlobalCB"]["gStride"] = size.x;
@@ -484,7 +504,12 @@ void OptixDenoiser_::convertMotionVectors(RenderContext* pRenderContext, const T
     mpConvertMotionVectors->execute(pRenderContext, size.x, size.y);
 }
 
-void OptixDenoiser_::convertTexToBuf(RenderContext* pRenderContext, const Texture::SharedPtr& tex, const Buffer::SharedPtr& buf, const uint2& size)
+void OptixDenoiser_::convertTexToBuf(
+    RenderContext* pRenderContext,
+    const Texture::SharedPtr& tex,
+    const Buffer::SharedPtr& buf,
+    const uint2& size
+)
 {
     auto vars = mpConvertTexToBuf->getVars();
     vars["GlobalCB"]["gStride"] = size.x;
@@ -493,7 +518,13 @@ void OptixDenoiser_::convertTexToBuf(RenderContext* pRenderContext, const Textur
     mpConvertTexToBuf->execute(pRenderContext, size.x, size.y);
 }
 
-void OptixDenoiser_::convertNormalsToBuf(RenderContext* pRenderContext, const Texture::SharedPtr& tex, const Buffer::SharedPtr& buf, const uint2& size, rmcv::mat4 viewIT)
+void OptixDenoiser_::convertNormalsToBuf(
+    RenderContext* pRenderContext,
+    const Texture::SharedPtr& tex,
+    const Buffer::SharedPtr& buf,
+    const uint2& size,
+    rmcv::mat4 viewIT
+)
 {
     auto vars = mpConvertNormalsToBuf->getVars();
     vars["GlobalCB"]["gStride"] = size.x;
@@ -503,7 +534,12 @@ void OptixDenoiser_::convertNormalsToBuf(RenderContext* pRenderContext, const Te
     mpConvertTexToBuf->execute(pRenderContext, size.x, size.y);
 }
 
-void OptixDenoiser_::convertBufToTex(RenderContext* pRenderContext, const Buffer::SharedPtr& buf, const Texture::SharedPtr& tex, const uint2& size)
+void OptixDenoiser_::convertBufToTex(
+    RenderContext* pRenderContext,
+    const Buffer::SharedPtr& buf,
+    const Texture::SharedPtr& tex,
+    const uint2& size
+)
 {
     auto vars = mpConvertBufToTex->getVars();
     vars["GlobalCB"]["gStride"] = size.x;
