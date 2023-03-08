@@ -19,3 +19,6 @@
 [submodule "external/vulkan-headers"]
 	path = external/vulkan-headers
 	url = https://github.com/KhronosGroup/Vulkan-Headers
+[submodule "Source/RenderPasses/Falcor-playground"]
+	path = Source/RenderPasses/Falcor-playground
+	url = https://github.com/udemegane/Falcor-playground.git
