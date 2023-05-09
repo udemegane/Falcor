@@ -26,7 +26,6 @@ set(FALCOR_USE_SYSTEM_PYTHON OFF CACHE BOOL "Use system Python distribution")
 # Enable/disable USD.
 set(FALCOR_ENABLE_USD ON CACHE BOOL "Enable USD")
 
-
 # Header validation.
 # If enabled, additional targets are generated to validate that headers are self sufficient.
 set(FALCOR_VALIDATE_HEADERS OFF CACHE BOOL "Enable header validation")
@@ -38,7 +37,6 @@ set(FALCOR_PRECOMPILED_HEADERS ON CACHE BOOL "Enable precompiled headers")
 # -----------------------------------------------------------------------------
 # Check platform
 # -----------------------------------------------------------------------------
-
 if(${CMAKE_SYSTEM_NAME} MATCHES "Window")
     set(FALCOR_PLATFORM "Windows")
     set(FALCOR_WINDOWS TRUE)
@@ -48,6 +46,7 @@ elseif(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
 else()
     message(FATAL_ERROR "Unsupported platform!")
 endif()
+
 message(STATUS "Platform: ${FALCOR_PLATFORM}")
 
 # Check if D3D12/Vulkan are available.
@@ -57,7 +56,6 @@ set(FALCOR_HAS_VULKAN ON)
 # -----------------------------------------------------------------------------
 # git submodules
 # -----------------------------------------------------------------------------
-
 if(NOT EXISTS ${CMAKE_SOURCE_DIR}/external/pybind11/CMakeLists.txt)
     message(STATUS "Updating git submodules ...")
     find_package(Git REQUIRED)
@@ -76,7 +74,6 @@ endif()
 # on these dependencies being available. We also add additional targets to pull
 # the dependencies when the project is built such that they are updated automatically
 # if the manifest files change.
-
 if(FALCOR_WINDOWS)
     set(PACKMAN "${CMAKE_SOURCE_DIR}/tools/packman/packman.cmd")
     set(PACKMAN_PLATFORM "windows-x86_64")
@@ -109,20 +106,19 @@ if(FALCOR_LINUX)
     set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
 endif()
 
-
 # -----------------------------------------------------------------------------
 # CUDA
 # -----------------------------------------------------------------------------
 
-
 # Set default CUDA architecture to 75 (Turing).
 # This can be overwritten for individual targets using the CUDA_ARCHITECTURE property.
 if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-  set(CMAKE_CUDA_ARCHITECTURES 75-virtual)
+    set(CMAKE_CUDA_ARCHITECTURES 75-virtual)
 endif()
 
 include(CheckLanguage)
 check_language(CUDA)
+
 if(CMAKE_CUDA_COMPILER)
     message(STATUS "Enabling CUDA support.")
     enable_language(CUDA)
@@ -135,7 +131,6 @@ endif()
 # -----------------------------------------------------------------------------
 # Python
 # -----------------------------------------------------------------------------
-
 if(FALCOR_USE_SYSTEM_PYTHON)
     find_package(Python 3.7 EXACT COMPONENTS Interpreter Development REQUIRED)
 else()
@@ -155,6 +150,7 @@ endif()
 
 # Require builds to be outside of source tree.
 file(TO_CMAKE_PATH "${PROJECT_BINARY_DIR}/CMakeLists.txt" LOC_PATH)
+
 if(EXISTS "${LOC_PATH}")
     message(FATAL_ERROR "You cannot build in a source directory (or any directory with a CMakeLists.txt file). Please use a build directory instead.")
 endif()
@@ -191,7 +187,6 @@ set(FALCOR_PLUGIN_OUTPUT_DIRECTORY ${FALCOR_OUTPUT_DIRECTORY}/plugins)
 # -----------------------------------------------------------------------------
 # External dependencies
 # -----------------------------------------------------------------------------
-
 add_subdirectory(external)
 
 message(STATUS "Feature flags:")
@@ -212,7 +207,6 @@ message(STATUS "FALCOR_ENABLE_USD: ${FALCOR_ENABLE_USD}")
 # -----------------------------------------------------------------------------
 # Packman dependencies
 # -----------------------------------------------------------------------------
-
 add_custom_target(packman_dependencies DEPENDS packman_dependencies_stamp)
 set_target_properties(packman_dependencies PROPERTIES FOLDER "Misc")
 add_custom_command(
@@ -262,7 +256,6 @@ endfunction()
 # -----------------------------------------------------------------------------
 # Data file handling
 # -----------------------------------------------------------------------------
-
 add_custom_target(copy_data_folder ALL
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/data ${FALCOR_OUTPUT_DIRECTORY}/data
 )
@@ -332,7 +325,6 @@ endfunction()
 # We currently use the legacy batch files for deploying additional binaries.
 # TODO: This should be replaced with a better approach allowing individual
 # targets to deploy dependencies.
-
 set(source_dir ${CMAKE_SOURCE_DIR})
 set(output_dir ${FALCOR_OUTPUT_DIRECTORY})
 file(TO_NATIVE_PATH ${source_dir} source_dir)
@@ -347,8 +339,8 @@ elseif(FALCOR_LINUX)
         COMMAND ${CMAKE_SOURCE_DIR}/build_scripts/deploycommon.sh ${source_dir} ${output_dir} $<CONFIG> ${FALCOR_SLANG_CONFIG} ${FALCOR_DLSS_DIR}
     )
 endif()
-set_target_properties(deploy_dependencies PROPERTIES FOLDER "Misc")
 
+set_target_properties(deploy_dependencies PROPERTIES FOLDER "Misc")
 
 # -----------------------------------------------------------------------------
 # Header validation
@@ -374,6 +366,7 @@ function(validate_headers target)
     # Copy properties from original target.
     foreach(property INCLUDE_DIRECTORIES LINK_LIBRARIES COMPILE_DEFINITIONS COMPILE_FEATURES)
         get_target_property(value ${target} ${property})
+
         if(value)
             set_property(TARGET ${validate_target} PROPERTY ${property} ${value})
         endif()
@@ -388,9 +381,11 @@ function(validate_headers target)
 
     # Create a list of CPP files, each including one header.
     set(validate_sources "")
+
     foreach(file ${sources})
         if(${file} MATCHES "^[^.][^.].*\\.h$" AND NOT ${file} IN_LIST ignore_files)
             string(SHA1 id ${file})
+
             # shorten to help avoid super long file names
             string(SUBSTRING ${id} 0, 8, id)
             set(cpp_file ${validate_target}/${id}.cpp)
@@ -409,7 +404,6 @@ endfunction()
 # -----------------------------------------------------------------------------
 # Ninja log analyzer
 # -----------------------------------------------------------------------------
-
 if(${CMAKE_GENERATOR} MATCHES "Ninja")
     add_custom_target(ninja_log_analyzer ALL
         COMMAND ${TOOLS_PYTHON} ${CMAKE_SOURCE_DIR}/tools/ninja_log_analyzer.py ${CMAKE_CURRENT_BINARY_DIR}/.ninja_log -c 10
@@ -421,12 +415,10 @@ endif()
 # -----------------------------------------------------------------------------
 # Project sources
 # -----------------------------------------------------------------------------
-
 add_subdirectory(Source/Falcor)
 add_subdirectory(Source/Mogwai)
 add_subdirectory(Source/plugins)
 add_subdirectory(Source/RenderPasses)
-add_subdirectory(Source/Samples)
 add_subdirectory(Source/Tools)
 
 add_dependencies(Falcor copy_data_folder copy_scripts_folder)
