@@ -44,7 +44,7 @@ The implementation is in [`Source/RenderPasses/Falcor-playground`](https://githu
 
 # Run the Demo
 ## Download
-You can download the prebuild demo from [Releases]().
+You can download the prebuild demo from [Releases](https://github.com/udemegane/Falcor/releases/tag/v0.1.0-restir_gi_demo).
 And you can olso download 3D scenes form [ORCA](https://developer.nvidia.com/orca): A collection of scenes and assets optimized for Falcor.
 
 ## Run
