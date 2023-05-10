@@ -1,9 +1,30 @@
 ![](docs/images/demo_teaser.jpg)
 # Falcor ReSTIR GI Demo
 
+---
+
+- [Falcor ReSTIR GI Demo](#falcor-restir-gi-demo)
+- [Abstract](#abstract)
+- [Run the Demo](#run-the-demo)
+  - [Download](#download)
+  - [Run](#run)
+    - [Keyboard Shortcuts](#keyboard-shortcuts)
+    - [GUI parameters](#gui-parameters)
+      - [ReSTIR DI/GI parameters](#restir-digi-parameters)
+      - [Others](#others)
+- [How to build](#how-to-build)
+  - [Prerequisites](#prerequisites)
+  - [Clone and build](#clone-and-build)
+    - [Visual Studio](#visual-studio)
+    - [Visual Studio Code](#visual-studio-code)
+    - [Configure Presets](#configure-presets)
+- [Graphics pipeline overview](#graphics-pipeline-overview)
+
+---
+
 # Abstract
-This branch of repository contains a demo of the ReSTIR DI/GI technique implemented in [Falcor 6.0](https://research.nvidia.com/publication/2021-06_restir-gi-path-resampling-real-time-path-tracing).
-This is UNOFFICIAL implementation, and the code is **just for study purpose** and inperfect.
+This branch of repository contains a demo of the ReSTIR DI/GI technique implemented in **[Falcor 6.0](https://research.nvidia.com/publication/2021-06_restir-gi-path-resampling-real-time-path-tracing)**.
+This is **my personal project, UNOFFICIAL implementation**, and the code is **just for study purpose** and inperfect.
 
 ReSTIR DI/GI technique enables to render high quality image of scenes with many light sources and indirect lighting using real-time raytracing with few rays at each pixel per frame.
  - Official ReSTIR GI project page: https://research.nvidia.com/publication/2021-06_restir-gi-path-resampling-real-time-path-tracing
@@ -12,6 +33,14 @@ ReSTIR DI/GI technique enables to render high quality image of scenes with many 
 Also this demo use Nvidia Real-Time denoisers (NRD) to denoise the image which is included in Falcor.
  - Official NRD SDK page: https://developer.nvidia.com/rtx/ray-tracing/rt-denoisers
  - NRD Github page: https://github.com/NVIDIAGameWorks/RayTracingDenoiser
+
+The implementation is in [`Source/RenderPasses/Falcor-playground`](https://github.com/udemegane/Falcor-playground), as 2 RenderPasses `ReSTIRDIPass` and `ReSTIRGIPass`.
+
+
+
+**Details of implementation is described in [here](#graphics-pipeline-overview)**.
+
+
 
 # Run the Demo
 ## Download
@@ -22,12 +51,12 @@ And you can olso download 3D scenes form [ORCA](https://developer.nvidia.com/orc
 Execute `Demo.bat`, then the renderer will launch.
 If you build falcor manually, execute `Demo_vscode/vs2019/vs2022.bat` Instead of Demo.bat.
 
-![](docs/images/2023-05-11-01-23-56.png)
-Click `File` -> `Load Scene`, then select a scene file.
-![](docs/images/2023-05-11-01-00-30.png)
+![](docs/images/2023-05-11-01-23-56.png)\
+Click `File` -> `Load Scene`, then select a scene file.\
+![](docs/images/2023-05-11-01-00-30.png)\
 
 Then, you can see the real-time pathtrace demo.
-![](docs/images/2023-05-11-02-21-44.png)
+![](docs/images/2023-05-11-02-21-44.png)\
 For more information, please see Falcor original Page: https://github.com/NVIDIAGameWorks/Falcor
 
 ### Keyboard Shortcuts
@@ -80,11 +109,8 @@ You can see more information for handling Mogwai from [here](https://github.com/
 
 #### Others
 You can also change parameters other renderpasses, and scene settings such as lights, camera, etc.
-![](docs/images/2023-05-11-02-44-01.png)
+![](docs/images/2023-05-11-02-44-01.png)\
 ![](docs/images/changelights.gif)
-
-
-
 
 
 # How to build
