@@ -180,8 +180,8 @@ An existing build tree can be compiled using `cmake --build build/<preset name>`
 ---
 # Graphics pipeline overview
 ## Graph Overview
-Render-Graph dependency of this demo is shown in below.
-![](docs/images/graph.jpg)\
+Render-Graph dependency of this demo is shown in below.\
+![](docs/images/Graph.jpg)
 
 The above diagram omits resources that are not actually used.
 The actual dependencies are described in [the python script](https://github.com/udemegane/Falcor/blob/ReSTIR_GI_Demo/scripts/RealTimePathTrace.py).
