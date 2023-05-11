@@ -19,6 +19,25 @@
     - [Visual Studio Code](#visual-studio-code)
     - [Configure Presets](#configure-presets)
 - [Graphics pipeline overview](#graphics-pipeline-overview)
+  - [Graph Overview](#graph-overview)
+  - [Resources detail and execution time](#resources-detail-and-execution-time)
+    - [Gbuffer](#gbuffer)
+      - [Output](#output)
+    - [ReSTIR DI](#restir-di)
+      - [Input](#input)
+      - [Output](#output-1)
+    - [ReSTIR GI](#restir-gi)
+      - [Input](#input-1)
+      - [Output](#output-2)
+    - [NRD](#nrd)
+      - [Input](#input-2)
+      - [Output](#output-3)
+    - [ModulateIllumination](#modulateillumination)
+      - [Input](#input-3)
+      - [Output](#output-4)
+    - [ToneMapper](#tonemapper)
+      - [Input](#input-4)
+      - [Output](#output-5)
 
 ---
 
@@ -158,8 +177,41 @@ Use `cmake --preset <preset name>` to generate the build tree for a given preset
 
 An existing build tree can be compiled using `cmake --build build/<preset name>`.
 
+---
 # Graphics pipeline overview
-WIP
+## Graph Overview
+Render-Graph dependency of this demo is shown in below.
+![](docs/images/graph.jpg)\
+
+The above diagram omits resources that are not actually used.
+The actual dependencies are described in [the python script](https://github.com/udemegane/Falcor/blob/ReSTIR_GI_Demo/scripts/RealTimePathTrace.py).
+
+## Resources detail and execution time
+
+### Gbuffer
+#### Output
+### ReSTIR DI
+#### Input
+#### Output
+
+### ReSTIR GI
+#### Input
+#### Output
+### NRD
+#### Input
+#### Output
+### ModulateIllumination
+#### Input
+#### Output
+
+### ToneMapper
+#### Input
+#### Output
+
+
+
+
+
 
 
 
