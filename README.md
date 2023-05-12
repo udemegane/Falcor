@@ -52,7 +52,9 @@ The implementation is in [`Source/RenderPasses/Falcor-playground`](https://githu
 
 # Run the Demo
 ## Download
-You can download the prebuild demo from [Releases](https://github.com/udemegane/Falcor/releases/tag/v0.1.0-restir_gi_demo).
+~~You can download the prebuild demo from [Releases](https://github.com/udemegane/Falcor/releases/tag/v0.1.0-restir_gi_demo).~~ (Currently it's doesn't work. Maybe Falcor doesn't support to build portable executable?)
+
+Or you can build the demo by yourself. See [How to build](#how-to-build) section.
 And you can olso download 3D scenes form [ORCA](https://developer.nvidia.com/orca): A collection of scenes and assets optimized for Falcor.
 
 ## Run
@@ -202,18 +204,4 @@ The actual dependencies are described in [the python script](https://github.com/
 ![](docs/images/renderpass_capture/png/2023-05-12-16-37-25.png "Indirect + Direct estimated illumination")
 ![](docs/images/renderpass_capture/Mogwai.ToneMapper.dst.27018.png "Final output")
 ![](docs/images/renderpass_capture/reference/Mogwai.ToneMapper.dst.43969.png "Refelence output")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
