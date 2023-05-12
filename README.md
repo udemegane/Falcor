@@ -22,22 +22,11 @@
   - [Graph Overview](#graph-overview)
   - [Resources detail and execution time](#resources-detail-and-execution-time)
     - [Gbuffer](#gbuffer)
-      - [Output](#output)
     - [ReSTIR DI](#restir-di)
-      - [Input](#input)
-      - [Output](#output-1)
     - [ReSTIR GI](#restir-gi)
-      - [Input](#input-1)
-      - [Output](#output-2)
+      - [Output](#output)
     - [NRD](#nrd)
-      - [Input](#input-2)
-      - [Output](#output-3)
-    - [ModulateIllumination](#modulateillumination)
-      - [Input](#input-3)
-      - [Output](#output-4)
-    - [ToneMapper](#tonemapper)
-      - [Input](#input-4)
-      - [Output](#output-5)
+    - [ModulateIllumination \& ToneMapper](#modulateillumination--tonemapper)
 
 ---
 
@@ -189,24 +178,34 @@ The actual dependencies are described in [the python script](https://github.com/
 ## Resources detail and execution time
 
 ### Gbuffer
-#### Output
 ### ReSTIR DI
-#### Input
-#### Output
-
+![Direct Illumination](docs/images/renderpass_capture/png/2023-05-12-15-49-23.png "Direct Illumination")
+![](docs/images/renderpass_capture/png/2023-05-12-16-11-48.png "Diffuse Reflectance")
+![](docs/images/renderpass_capture/png/2023-05-12-16-12-41.png "Specular Reflectance")
 ### ReSTIR GI
-#### Input
 #### Output
-### NRD
-#### Input
-#### Output
-### ModulateIllumination
-#### Input
-#### Output
+![](docs/images/renderpass_capture/png/2023-05-12-16-13-48.png "Indirect Illumination")
 
-### ToneMapper
-#### Input
-#### Output
+![](docs/images/renderpass_capture/png/2023-05-12-16-14-25.png "Indirect + Direct Illumination")
+![](docs/images/renderpass_capture/png/2023-05-12-16-15-29.png "Indirect Illumination (No ReSTIR GI algorithm)")
+
+![](docs/images/renderpass_capture/png/2023-05-12-16-26-24.png "Indirect diffuse radiance (demodulated)")
+![](docs/images/renderpass_capture/png/2023-05-12-16-26-42.png "Indirect specular radiance (demodulated)")
+
+![](docs/images/renderpass_capture/png/2023-05-12-16-28-46.png "Indirect + Direct diffuse radiance (demodulated)")
+![](docs/images/renderpass_capture/png/2023-05-12-16-29-37.png "Indirect + Direct specular radiance (demodulated)")
+
+### NRD
+![](docs/images/renderpass_capture/png/2023-05-12-16-33-29.png "Indirect + Direct diffuse filtered radiance")
+![](docs/images/renderpass_capture/png/2023-05-12-16-34-33.png "Indirect + Direct specular filtered radiance")
+### ModulateIllumination & ToneMapper
+![](docs/images/renderpass_capture/png/2023-05-12-16-37-25.png "Indirect + Direct estimated illumination")
+![](docs/images/renderpass_capture/Mogwai.ToneMapper.dst.27018.png "Final output")
+![](docs/images/renderpass_capture/reference/Mogwai.ToneMapper.dst.43969.png "Refelence output")
+
+
+
+
 
 
 
