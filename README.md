@@ -180,28 +180,75 @@ The actual dependencies are described in [the python script](https://github.com/
 ## Resources detail and execution time
 
 ### Gbuffer
-### ReSTIR DI
-![Direct Illumination](docs/images/renderpass_capture/png/2023-05-12-15-49-23.png "Direct Illumination")
-![](docs/images/renderpass_capture/png/2023-05-12-16-11-48.png "Diffuse Reflectance")
-![](docs/images/renderpass_capture/png/2023-05-12-16-12-41.png "Specular Reflectance")
-### ReSTIR GI
-#### Output
-![](docs/images/renderpass_capture/png/2023-05-12-16-13-48.png "Indirect Illumination")
 
-![](docs/images/renderpass_capture/png/2023-05-12-16-14-25.png "Indirect + Direct Illumination")
+---
+
+### ReSTIR DI
+- Direct Illumination by ReSTIR (only analytic lights are included in the ReSTIR algorithm)
+![Direct Illumination](docs/images/renderpass_capture/png/2023-05-12-15-49-23.png "Direct Illumination")
+
+This render pass also output diffuse/specular reflectance for demodulation.
+
+- Diffuse reflectance(black sky albedo) + Specular translucent reflectance
+![](docs/images/renderpass_capture/png/2023-05-12-16-11-48.png "Diffuse Reflectance")
+
+
+- Specular reflectance
+![](docs/images/renderpass_capture/png/2023-05-12-16-12-41.png "Specular Reflectance")
+
+---
+
+### ReSTIR GI
+- Indirect illumination at initial naive sampling. Actually, this output is placed on reservoir, don’t output as texture.
 ![](docs/images/renderpass_capture/png/2023-05-12-16-15-29.png "Indirect Illumination (No ReSTIR GI algorithm)")
 
+- Indirect illumination by ReSTIR GI algorithm.(temporal and spatial resembling)
+![](docs/images/renderpass_capture/png/2023-05-12-16-13-48.png "Indirect Illumination")
+
+- ReSTIR DI+GI output.
+![](docs/images/renderpass_capture/png/2023-05-12-16-14-25.png "Indirect + Direct Illumination")
+
+Instead of color output, NRD requires diffuse/Specular demodulation output. I simply divide the color by diffuse/specular reflectance(ReSTIR pass output).
+
+- Indirect diffuse radiance.
 ![](docs/images/renderpass_capture/png/2023-05-12-16-26-24.png "Indirect diffuse radiance (demodulated)")
+
+- Indirect Specular radiance.
 ![](docs/images/renderpass_capture/png/2023-05-12-16-26-42.png "Indirect specular radiance (demodulated)")
 
+#### Output
+
+Finally, this pass output DI+GI estimated noisy result and raytrace path distance from secondary ray.
+- Indirect + direct diffuse radiance(RGB) and raytraced path distance from secondary ray(A).
 ![](docs/images/renderpass_capture/png/2023-05-12-16-28-46.png "Indirect + Direct diffuse radiance (demodulated)")
+
+- Indirect + direct Specular radiance(RGB) and raytraced path distance from secondary ray(A).
 ![](docs/images/renderpass_capture/png/2023-05-12-16-29-37.png "Indirect + Direct specular radiance (demodulated)")
 
+---
+
 ### NRD
+Not only demodulation radiance/reflectance, but NRD requires motionvector, normal, roughness and material ID. These inputs are provided by g-buffer.
+
+- Indirect + Direct diffuse filtered radiance
 ![](docs/images/renderpass_capture/png/2023-05-12-16-33-29.png "Indirect + Direct diffuse filtered radiance")
+
+- Indirect + Direct specular filtered radiance
 ![](docs/images/renderpass_capture/png/2023-05-12-16-34-33.png "Indirect + Direct specular filtered radiance")
+
+---
+
 ### ModulateIllumination & ToneMapper
+Modulate diffuse and specular, and then tone mapping.
+
+- Indirect + Direct estimated illumination
 ![](docs/images/renderpass_capture/png/2023-05-12-16-37-25.png "Indirect + Direct estimated illumination")
+
+---
+
+- Final output
 ![](docs/images/renderpass_capture/Mogwai.ToneMapper.dst.27018.png "Final output")
+
+- Reference output by Falcor pathtracer (spp=100)
 ![](docs/images/renderpass_capture/reference/Mogwai.ToneMapper.dst.43969.png "Refelence output")
 
