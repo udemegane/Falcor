@@ -178,12 +178,50 @@ The above diagram omits resources that are not actually used.
 The actual dependencies are described in [the python script](https://github.com/udemegane/Falcor/blob/ReSTIR_GI_Demo/scripts/RealTimePathTrace.py).
 
 ## Resources detail and execution time
+I tested this demo on my PC (RTX 2080, Ryzen 9 3900X, 64GB RAM) with 1920x1057 resolution on Amazon lumberyard bistro exteroir, and get 40~60FPS by default settings.
 
 ### Gbuffer
 
 ---
 
 ### ReSTIR DI
+Constructed by 2 pass (Prepare Reservoir pass and Final shading pass).
+- Prepare Reservoir pass
+  - Initial Sampling
+  - Temporal Resampling
+- Final shading pass
+  - Spatial Resampling
+  - Final Shading
+
+Intermediate Buffer payload(ReSTIR Reservoir) is shown below.\
+```hlsl
+struct Sample
+{
+    float3 Li; // already multiply invPdf.
+    float3 dir;
+    float length;
+}
+
+struct Reservoir
+{
+    float wSum;
+    Sample s;
+    float targetPdfSample;
+    uint M;
+    ...
+}
+
+struct PackedReservoir
+{
+    // 128bit x2
+    uint4 pTargetLi;
+    float2 LengthWsum;
+    uint2 MDir;
+}
+```
+
+<br>
+
 - Direct Illumination by ReSTIR (only analytic lights are included in the ReSTIR algorithm)
 ![Direct Illumination](docs/images/renderpass_capture/png/2023-05-12-15-49-23.png "Direct Illumination")
 
@@ -199,6 +237,54 @@ This render pass also output diffuse/specular reflectance for demodulation.
 ---
 
 ### ReSTIR GI
+Constructed by 2 pass (Prepare Reservoir pass and Final shading pass).
+- Prepare Reservoir pass
+  - Initial Sampling
+  - Temporal Resampling
+- Final shading pass
+  - Spatial Resampling
+  - Final Shading
+
+Intermediate Buffer payload(ReSTIR GI Reservoir) is shown below.\
+```hlsl
+struct GISample
+{
+    float3 xv;         //
+    float3 nv;         //
+    float3 xs;         //
+    float3 ns;         //
+    float3 Lo;         //
+    float3 weight;     //
+    float invPdf;      //
+    float sceneLength; //
+}
+
+struct GIReservoir
+{
+    GISample s; //
+    float wSum; //
+    uint M;
+    bool updated;
+    float targetPdfSample; //
+
+}
+
+
+struct PackedGIReservoir
+{
+    // 128bit x5
+    // it's too heavy...
+    float4 LoSceneLength;
+    float4 weightInvPdf;
+    float4 XvWSum;
+    float4 XsPTarget;
+    uint4 NvMNsUpdated;
+}
+```
+
+<br>
+
+
 - Indirect illumination at initial naive sampling. Actually, this output is placed on reservoir, don’t output as texture.
 ![](docs/images/renderpass_capture/png/2023-05-12-16-15-29.png "Indirect Illumination (No ReSTIR GI algorithm)")
 
