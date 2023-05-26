@@ -1,5 +1,5 @@
 ![](docs/images/demo_teaser.jpg)
-# Falcor ReSTIR GI Demo
+# Falcor ReSTIR GI Demo (Unofficial)
 
 Original Falcor repository: https://github.com/NVIDIAGameWorks/Falcor
 Original Falcor README: [README.original.md](./README.original.md)
