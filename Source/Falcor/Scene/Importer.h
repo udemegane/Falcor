@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -27,11 +27,11 @@
  **************************************************************************/
 #pragma once
 #include "SceneBuilder.h"
+#include "ImporterError.h"
 #include "Core/Macros.h"
-#include "Core/Errors.h"
+#include "Core/Error.h"
 #include "Core/Plugin.h"
 #include "Core/Platform/OS.h"
-#include "Utils/Scripting/Dictionary.h"
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -40,44 +40,6 @@
 
 namespace Falcor
 {
-    /** Exception thrown during scene import.
-        Holds the path of the imported asset and a description of the exception.
-    */
-    class FALCOR_API ImporterError : public Exception
-    {
-    public:
-        ImporterError() noexcept
-        {}
-
-        ImporterError(const std::filesystem::path& path, const char* what)
-            : Exception(what)
-            , mpPath(std::make_shared<std::filesystem::path>(path))
-        {}
-
-        ImporterError(const std::filesystem::path& path, const std::string& what)
-            : ImporterError(path, what.c_str())
-        {}
-
-        template<typename... Args>
-        explicit ImporterError(const std::filesystem::path& path, fmt::format_string<Args...> format, Args&&... args)
-            : ImporterError(path, fmt::format(format, std::forward<Args>(args)...).c_str())
-        {}
-
-        virtual ~ImporterError() override
-        {}
-
-        ImporterError(const ImporterError& other) noexcept
-        {
-            mpWhat = other.mpWhat;
-            mpPath = other.mpPath;
-        }
-
-        const std::filesystem::path& path() const noexcept { return *mpPath; }
-
-    private:
-        std::shared_ptr<std::filesystem::path> mpPath;
-    };
-
     /** Base class for importers.
         Importers are bound to a set of file extensions. This allows the right importer to
         be called when importing an asset file.
@@ -102,7 +64,17 @@ namespace Falcor
             \param[in] dict Optional dictionary.
             Throws an ImporterError if something went wrong.
         */
-        virtual void importScene(const std::filesystem::path& path, SceneBuilder& builder, const Dictionary& dict) = 0;
+        virtual void importScene(const std::filesystem::path& path, SceneBuilder& builder, const std::map<std::string, std::string>& materialToShortName) = 0;
+
+        /** Import a scene from memory.
+            \param[in] buffer Memory buffer.
+            \param[in] byteSize Size in bytes of memory buffer.
+            \param[in] extension File extension for the format the scene is stored in.
+            \param[in] builder Scene builder.
+            \param[in] dict Optional dictionary.
+            Throws an ImporterError if something went wrong.
+        */
+        virtual void importSceneFromMemory(const void* buffer, size_t byteSize, std::string_view extension, SceneBuilder& builder, const std::map<std::string, std::string>& materialToShortName);
 
         // Importer factory
 
@@ -111,7 +83,7 @@ namespace Falcor
             \param pm Plugin manager.
             \return Returns an instance of the importer or nullptr if no compatible importer was found.
          */
-        static std::unique_ptr<Importer> create(std::string extension, const PluginManager& pm = PluginManager::instance());
+        static std::unique_ptr<Importer> create(std::string_view extension, const PluginManager& pm = PluginManager::instance());
 
         /** Return a list of supported file extensions by the current set of loaded importer plugins.
         */

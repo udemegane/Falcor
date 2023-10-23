@@ -46,7 +46,7 @@ void testBuffer(GPUUnitTestContext& ctx, uint32_t numElems, uint32_t index = 0, 
 {
     static_assert(type == Type::ByteAddressBuffer || type == Type::TypedBuffer || type == Type::StructuredBuffer);
 
-    Device* pDevice = ctx.getDevice().get();
+    ref<Device> pDevice = ctx.getDevice();
 
     numElems = div_round_up(numElems, 256u) * 256u; // Make sure we run full thread groups.
 
@@ -61,17 +61,17 @@ void testBuffer(GPUUnitTestContext& ctx, uint32_t numElems, uint32_t index = 0, 
     }
 
     // Create clear program.
-    Program::DefineList defines = {{"TYPE", std::to_string((uint32_t)type)}};
+    DefineList defines = {{"TYPE", std::to_string((uint32_t)type)}};
     ctx.createProgram("Tests/Core/BufferTests.cs.slang", "clearBuffer", defines);
 
     // Create test buffer.
-    Buffer::SharedPtr pBuffer;
+    ref<Buffer> pBuffer;
     if constexpr (type == Type::ByteAddressBuffer)
-        pBuffer = Buffer::create(pDevice, numElems * sizeof(uint32_t), ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None);
+        pBuffer = pDevice->createBuffer(numElems * sizeof(uint32_t), ResourceBindFlags::UnorderedAccess, MemoryType::DeviceLocal);
     else if constexpr (type == Type::TypedBuffer)
-        pBuffer = Buffer::createTyped<uint32_t>(pDevice, numElems, ResourceBindFlags::UnorderedAccess);
+        pBuffer = pDevice->createTypedBuffer<uint32_t>(numElems, ResourceBindFlags::UnorderedAccess);
     else if constexpr (type == Type::StructuredBuffer)
-        pBuffer = Buffer::createStructured(pDevice, ctx.getProgram(), "buffer", numElems, ResourceBindFlags::UnorderedAccess);
+        pBuffer = pDevice->createStructuredBuffer(ctx.getVars()->getRootVar()["buffer"], numElems, ResourceBindFlags::UnorderedAccess);
 
     ctx["buffer"] = pBuffer;
 
@@ -106,7 +106,7 @@ void testBuffer(GPUUnitTestContext& ctx, uint32_t numElems, uint32_t index = 0, 
     ctx.runProgram(numElems, 1, 1);
 
     // Verify results.
-    const uint32_t* pResult = ctx.mapBuffer<const uint32_t>("result");
+    std::vector<uint32_t> result = ctx.readBuffer<uint32_t>("result");
     for (uint32_t i = 0; i < numElems; i++)
     {
         // Each RMW pass adds i+1 to the element at index i.
@@ -114,11 +114,10 @@ void testBuffer(GPUUnitTestContext& ctx, uint32_t numElems, uint32_t index = 0, 
         uint32_t expected = (i + 1) * kIterations * 2;
         if (i >= index && i < index + blob.size())
             expected = blob[i - index] + (i + 1) * kIterations;
-        uint32_t result = pResult[i];
+        uint32_t actual = result[i];
 
-        EXPECT_EQ(result, expected) << "i = " << i << " (numElems = " << numElems << " index = " << index << " count = " << count << ")";
+        EXPECT_EQ(actual, expected) << "i = " << i << " (numElems = " << numElems << " index = " << index << " count = " << count << ")";
     }
-    ctx.unmapBuffer("result");
 }
 } // namespace
 
@@ -166,18 +165,59 @@ GPU_TEST(BufferUpdate)
     const uint4 a = {1, 2, 3, 4};
     const uint4 b = {5, 6, 7, 8};
 
-    auto pBuffer = Buffer::create(ctx.getDevice().get(), 16);
+    auto pBuffer = ctx.getDevice()->createBuffer(16);
 
     pBuffer->setBlob(&a, 0, 16);
 
-    uint4 resA = *reinterpret_cast<const uint4*>(pBuffer->map(Buffer::MapType::Read));
-    pBuffer->unmap();
+    uint4 resA = pBuffer->getElement<uint4>(0);
     EXPECT_EQ(a, resA);
 
     pBuffer->setBlob(&b, 0, 16);
 
-    uint4 resB = *reinterpret_cast<const uint4*>(pBuffer->map(Buffer::MapType::Read));
-    pBuffer->unmap();
+    uint4 resB = pBuffer->getElement<uint4>(0);
     EXPECT_EQ(b, resB);
 }
+
+GPU_TEST(BufferWrite)
+{
+    auto testWrite = [&ctx](uint4 testData, bool useInitData)
+    {
+        ref<Buffer> bufA =
+            ctx.getDevice()->createBuffer(16, ResourceBindFlags::None, MemoryType::Upload, useInitData ? &testData : nullptr);
+        ref<Buffer> bufB = ctx.getDevice()->createBuffer(16, ResourceBindFlags::None);
+
+        if (!useInitData)
+        {
+            uint4* data = reinterpret_cast<uint4*>(bufA->map(Buffer::MapType::Write));
+            std::memcpy(data, &testData, 16);
+            bufA->unmap();
+        }
+
+        ctx.getDevice()->getRenderContext()->copyResource(bufB.get(), bufA.get());
+
+        {
+            uint4 result = bufB->getElement<uint4>(0);
+            EXPECT_EQ(result, testData);
+        }
+
+        uint4 testData2 = testData * 10u;
+
+        {
+            uint4* data = reinterpret_cast<uint4*>(bufA->map(Buffer::MapType::Write));
+            std::memcpy(data, &testData2, 16);
+            bufA->unmap();
+        }
+
+        ctx.getDevice()->getRenderContext()->copyResource(bufB.get(), bufA.get());
+
+        {
+            uint4 result = bufB->getElement<uint4>(0);
+            EXPECT_EQ(result, testData2);
+        }
+    };
+
+    testWrite(uint4(1, 2, 3, 4), false);
+    testWrite(uint4(3, 4, 5, 6), true);
+}
+
 } // namespace Falcor

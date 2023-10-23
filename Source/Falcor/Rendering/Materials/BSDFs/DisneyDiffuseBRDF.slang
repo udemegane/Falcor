@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -28,7 +28,6 @@
 #include "Utils/Math/MathConstants.slangh"
 
 import Utils.Math.MathHelpers;
-import Utils.Color.ColorHelpers;
 import Rendering.Materials.Fresnel;
 __exported import Rendering.Materials.IBSDF;
 
@@ -36,11 +35,12 @@ __exported import Rendering.Materials.IBSDF;
  * Disney's diffuse reflection.
  * Based on https ://blog.selfshadow.com/publications/s2012-shading-course/burley/s2012_pbs_disney_brdf_notes_v3.pdf
  */
-struct DisneyDiffuseBRDF : IBSDF
+struct DisneyDiffuseBRDF : IBSDF, IDifferentiable
 {
     float3 albedo;   ///< Diffuse albedo.
     float roughness; ///< Roughness before remapping.
 
+    [Differentiable]
     float3 eval<S : ISampleGenerator>(const float3 wi, const float3 wo, inout S sg)
     {
         if (min(wi.z, wo.z) < kMinCosTheta)
@@ -75,6 +75,7 @@ struct DisneyDiffuseBRDF : IBSDF
     // private
 
     // Returns f(wi, wo) * pi.
+    [Differentiable]
     float3 evalWeight(float3 wi, float3 wo)
     {
         float3 h = normalize(wi + wo);

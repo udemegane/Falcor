@@ -34,10 +34,10 @@ namespace Falcor
  */
 GPU_TEST(RWTexture3D)
 {
-    Device* pDevice = ctx.getDevice().get();
+    ref<Device> pDevice = ctx.getDevice();
 
-    auto pTex = Texture::create3D(
-        pDevice, 16, 16, 16, ResourceFormat::R32Uint, 1, nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess
+    auto pTex = pDevice->createTexture3D(
+        16, 16, 16, ResourceFormat::R32Uint, 1, nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess
     );
     EXPECT(pTex);
 
@@ -53,7 +53,7 @@ GPU_TEST(RWTexture3D)
     ctx.runProgram(16, 16, 16);
 
     // Verify result.
-    const uint32_t* result = ctx.mapBuffer<const uint32_t>("result");
+    std::vector<uint32_t> result = ctx.readBuffer<uint32_t>("result");
     size_t i = 0;
     for (uint32_t z = 0; z < 16; z++)
     {
@@ -61,18 +61,18 @@ GPU_TEST(RWTexture3D)
         {
             for (uint32_t x = 0; x < 16; x++)
             {
-                EXPECT_EQ(result[i], x * y * z + 577) << "i = " << i++;
+                EXPECT_EQ(result[i], x * y * z + 577) << "i = " << i;
+                ++i;
             }
         }
     }
-    ctx.unmapBuffer("result");
 }
 
 /** GPU test for creating a min/max MIP pyramid.
  */
 GPU_TEST(TextureMinMaxMip)
 {
-    Device* pDevice = ctx.getDevice().get();
+    ref<Device> pDevice = ctx.getDevice();
 
     // Generate test texture.
     const uint32_t texWidth = 16;
@@ -96,8 +96,13 @@ GPU_TEST(TextureMinMaxMip)
     }
 
     // Create texture.
-    auto pTex = Texture::create2D(
-        pDevice, texWidth, texHeight, ResourceFormat::RGBA8Unorm, 1, Resource::kMaxPossible, textureBase.data(),
+    auto pTex = pDevice->createTexture2D(
+        texWidth,
+        texHeight,
+        ResourceFormat::RGBA8Unorm,
+        1,
+        Resource::kMaxPossible,
+        textureBase.data(),
         ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess
     );
     EXPECT(pTex) << "Texture was not created";
@@ -178,7 +183,7 @@ GPU_TEST(TextureMinMaxMip)
 // and explicitly as an 8-bit integer format (RGBA8Uint).
 GPU_TEST(Texture_Load8Bit)
 {
-    Device* pDevice = ctx.getDevice().get();
+    ref<Device> pDevice = ctx.getDevice();
 
     // Create test data.
     uint8_t data[1024];
@@ -192,21 +197,21 @@ GPU_TEST(Texture_Load8Bit)
 
     // Create texture in BGRX8Unorm format.
     // This is what Bitmap::createFromFile currently returns (see BitmapTests.cpp).
-    auto texUnorm = Texture::create2D(pDevice, 256, 1, ResourceFormat::BGRX8Unorm, 1, 1, data);
+    auto texUnorm = pDevice->createTexture2D(256, 1, ResourceFormat::BGRX8Unorm, 1, 1, data);
     EXPECT(texUnorm != nullptr);
 
     // Create texture in RGBA8Uint format.
-    auto texUint = Texture::create2D(pDevice, 256, 1, ResourceFormat::RGBA8Uint, 1, 1, data);
+    auto texUint = pDevice->createTexture2D(256, 1, ResourceFormat::RGBA8Uint, 1, 1, data);
     EXPECT(texUint != nullptr);
 
-    ctx.createProgram("Tests/Core/TextureLoadTests.cs.slang", "main");
+    ctx.createProgram("Tests/Core/TextureLoadTests.cs.slang", "testLoadFormat");
     ctx.allocateStructuredBuffer("result", 256);
     ctx["texUnorm"] = texUnorm;
     ctx["texUnormAsUint"] = texUnorm;
     ctx["texUint"] = texUint;
     ctx.runProgram(256);
 
-    const uint4* result = ctx.mapBuffer<const uint4>("result");
+    std::vector<uint4> result = ctx.readBuffer<uint4>("result");
 
     for (uint32_t i = 0; i < 256; i++)
     {
@@ -219,7 +224,43 @@ GPU_TEST(Texture_Load8Bit)
         EXPECT_EQ(result[i].z, i);
         EXPECT_EQ(result[i].w, i);
     }
+}
 
-    ctx.unmapBuffer("result");
+GPU_TEST(Texture2D_LoadMips)
+{
+    ref<Device> pDevice = ctx.getDevice();
+
+    std::filesystem::path paths[] = {
+        getRuntimeDirectory() / "data/tests/tiny_mip0.png",
+        getRuntimeDirectory() / "data/tests/tiny_mip1.png",
+        getRuntimeDirectory() / "data/tests/tiny_mip2.png",
+    };
+
+    auto tex = Texture::createMippedFromFiles(pDevice, paths, false);
+    ASSERT(tex != nullptr);
+
+    EXPECT_EQ(tex->getMipCount(), 3);
+
+    ctx.createProgram("Tests/Core/TextureLoadTests.cs.slang", "testLoadMips");
+    ctx.allocateStructuredBuffer("result", 3);
+    ctx["texUnorm"] = tex;
+    ctx.runProgram(1, 1, 1);
+
+    std::vector<uint4> result = ctx.readBuffer<uint4>("result");
+
+    EXPECT_EQ(result[0].x, 255);
+    EXPECT_EQ(result[0].y, 0);
+    EXPECT_EQ(result[0].z, 0);
+    EXPECT_EQ(result[0].w, 255);
+
+    EXPECT_EQ(result[1].x, 0);
+    EXPECT_EQ(result[1].y, 255);
+    EXPECT_EQ(result[1].z, 0);
+    EXPECT_EQ(result[1].w, 255);
+
+    EXPECT_EQ(result[2].x, 0);
+    EXPECT_EQ(result[2].y, 0);
+    EXPECT_EQ(result[2].z, 255);
+    EXPECT_EQ(result[2].w, 255);
 }
 } // namespace Falcor

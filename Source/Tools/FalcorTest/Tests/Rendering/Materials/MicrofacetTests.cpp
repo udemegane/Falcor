@@ -92,11 +92,11 @@ struct SamplingTestSpec
 
 void setupSamplingTest(GPUUnitTestContext& ctx, const SamplingTestSpec& spec, const std::string& csEntry)
 {
-    Device* pDevice = ctx.getDevice().get();
+    ref<Device> pDevice = ctx.getDevice();
 
     uint32_t testCount = spec.visibleNormals ? (uint32_t)spec.incidentAngles.size() : 1;
 
-    Program::DefineList defines;
+    DefineList defines;
     defines.add("TEST_NDF_TYPE", spec.ndf);
     ctx.createProgram(kShaderFile, csEntry, defines);
 
@@ -118,15 +118,15 @@ void setupSamplingTest(GPUUnitTestContext& ctx, const SamplingTestSpec& spec, co
         float theta = M_PI * spec.incidentAngles[i] / 180.f;
         testWi.push_back({std::sin(theta), 0.f, std::cos(theta)});
     }
-    auto pTestWiBuffer = Buffer::createStructured(
-        pDevice, var["testWi"], testCount, ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, testWi.data()
+    auto pTestWiBuffer = pDevice->createStructuredBuffer(
+        var["testWi"], testCount, ResourceBindFlags::ShaderResource, MemoryType::DeviceLocal, testWi.data()
     );
     var["testWi"] = pTestWiBuffer;
 }
 
 std::vector<std::vector<double>> tabulateHistogram(GPUUnitTestContext& ctx, const SamplingTestSpec& spec)
 {
-    Device* pDevice = ctx.getDevice().get();
+    ref<Device> pDevice = ctx.getDevice();
 
     uint32_t testCount = spec.visibleNormals ? (uint32_t)spec.incidentAngles.size() : 1;
     uint32_t binCount = spec.phiBinCount * spec.cosThetaBinCount;
@@ -134,32 +134,29 @@ std::vector<std::vector<double>> tabulateHistogram(GPUUnitTestContext& ctx, cons
     setupSamplingTest(ctx, spec, "tabulateHistogram");
 
     auto var = ctx.vars().getRootVar()["gMicrofacetSamplingTest"];
-    auto pHistogramBuffer = Buffer::createStructured(pDevice, var["histogramSampling"], testCount * binCount);
+    auto pHistogramBuffer = pDevice->createStructuredBuffer(var["histogramSampling"], testCount * binCount);
     var["histogramSampling"] = pHistogramBuffer;
     ctx.getRenderContext()->clearUAV(pHistogramBuffer->getUAV().get(), uint4(0));
 
     ctx.runProgram(spec.sampleCount / spec.threadSampleCount, 1, testCount);
 
-    auto pHistogramData = reinterpret_cast<const uint32_t*>(pHistogramBuffer->map(Buffer::MapType::Read));
-
+    std::vector<uint32_t> histogramData = pHistogramBuffer->getElements<uint32_t>();
     std::vector<std::vector<double>> histograms;
 
     for (uint32_t testIndex = 0; testIndex < testCount; ++testIndex)
     {
         std::vector<double> histogram(binCount);
         for (uint32_t i = 0; i < binCount; ++i)
-            histogram[i] = (double)pHistogramData[testIndex * binCount + i];
+            histogram[i] = (double)histogramData[testIndex * binCount + i];
         histograms.push_back(histogram);
     }
-
-    pHistogramBuffer->unmap();
 
     return histograms;
 }
 
 std::vector<std::vector<double>> tabulatePdf(GPUUnitTestContext& ctx, const SamplingTestSpec& spec)
 {
-    Device* pDevice = ctx.getDevice().get();
+    ref<Device> pDevice = ctx.getDevice();
 
     uint32_t testCount = spec.visibleNormals ? (uint32_t)spec.incidentAngles.size() : 1;
     uint32_t binCount = spec.phiBinCount * spec.cosThetaBinCount;
@@ -167,22 +164,19 @@ std::vector<std::vector<double>> tabulatePdf(GPUUnitTestContext& ctx, const Samp
     setupSamplingTest(ctx, spec, "tabulatePdf");
 
     auto var = ctx.vars().getRootVar()["gMicrofacetSamplingTest"];
-    auto pHistogramBuffer = Buffer::createStructured(pDevice, var["histogramPdf"], testCount * binCount);
+    auto pHistogramBuffer = pDevice->createStructuredBuffer(var["histogramPdf"], testCount * binCount);
     var["histogramPdf"] = pHistogramBuffer;
 
     ctx.runProgram(spec.phiBinCount, spec.cosThetaBinCount, testCount);
 
-    auto pHistogramData = reinterpret_cast<const double*>(pHistogramBuffer->map(Buffer::MapType::Read));
-
+    std::vector<double> histogramData = pHistogramBuffer->getElements<double>();
     std::vector<std::vector<double>> histograms;
 
     for (uint32_t testIndex = 0; testIndex < testCount; ++testIndex)
     {
         size_t offset = testIndex * binCount;
-        histograms.push_back(std::vector<double>(pHistogramData + offset, pHistogramData + offset + binCount));
+        histograms.push_back(std::vector<double>(histogramData.data() + offset, histogramData.data() + offset + binCount));
     }
-
-    pHistogramBuffer->unmap();
 
     return histograms;
 }
@@ -281,7 +275,7 @@ GPU_TEST(MicrofacetSigmaIntegration)
     // by Dupuy et al. 2016, Eq. 18.
     for (uint32_t t = 0; t < kNdfs.size(); ++t)
     {
-        Program::DefineList defines;
+        DefineList defines;
         defines.add("TEST_NDF_TYPE", kNdfs[t]);
         ctx.createProgram(kShaderFile, "sigmaIntegration", defines);
 
@@ -298,8 +292,8 @@ GPU_TEST(MicrofacetSigmaIntegration)
         ctx.allocateStructuredBuffer("result2", N);
 
         ctx.runProgram(N, 1, 1);
-        const float* result1 = ctx.mapBuffer<const float>("result1");
-        const float* result2 = ctx.mapBuffer<const float>("result2");
+        std::vector<float> result1 = ctx.readBuffer<float>("result1");
+        std::vector<float> result2 = ctx.readBuffer<float>("result2");
         for (uint32_t i = 0; i < N; ++i)
         {
             float sigmaRef = result1[i];
@@ -307,8 +301,6 @@ GPU_TEST(MicrofacetSigmaIntegration)
             float diff = std::abs(sigmaRef - sigmaEval);
             EXPECT_LT(diff, 5e-3f);
         }
-        ctx.unmapBuffer("result1");
-        ctx.unmapBuffer("result2");
     }
 }
 
@@ -320,7 +312,7 @@ GPU_TEST(MicrofacetSigmaLambdaConsistency)
     // by Dupuy et al. 2016, Eq. 18.
     for (uint32_t t = 0; t < kNdfs.size(); ++t)
     {
-        Program::DefineList defines;
+        DefineList defines;
         defines.add("TEST_NDF_TYPE", kNdfs[t]);
         ctx.createProgram(kShaderFile, "sigmaLambdaConsistency", defines);
 
@@ -337,8 +329,8 @@ GPU_TEST(MicrofacetSigmaLambdaConsistency)
         ctx.allocateStructuredBuffer("result2", N);
 
         ctx.runProgram(N, 1, 1);
-        const float* result1 = ctx.mapBuffer<const float>("result1");
-        const float* result2 = ctx.mapBuffer<const float>("result2");
+        std::vector<float> result1 = ctx.readBuffer<float>("result1");
+        std::vector<float> result2 = ctx.readBuffer<float>("result2");
         for (uint32_t i = 0; i < N; ++i)
         {
             float mu = -1 + 2 * float(i) / (N - 1);
@@ -357,8 +349,6 @@ GPU_TEST(MicrofacetSigmaLambdaConsistency)
             float diff = std::abs(sigma - rhs);
             EXPECT_LT(diff, 1e-3f);
         }
-        ctx.unmapBuffer("result1");
-        ctx.unmapBuffer("result2");
     }
 }
 
@@ -369,7 +359,7 @@ GPU_TEST(MicrofacetLambdaNonsymmetry)
     // by Dupuy et al. 2016, Eq. 18 and 19.
     for (uint32_t t = 0; t < kNdfs.size(); ++t)
     {
-        Program::DefineList defines;
+        DefineList defines;
         defines.add("TEST_NDF_TYPE", kNdfs[t]);
         ctx.createProgram(kShaderFile, "lambdaNonsymmetry", defines);
 
@@ -386,8 +376,8 @@ GPU_TEST(MicrofacetLambdaNonsymmetry)
         ctx.allocateStructuredBuffer("result2", N);
 
         ctx.runProgram(N, 1, 1);
-        const float* result1 = ctx.mapBuffer<const float>("result1");
-        const float* result2 = ctx.mapBuffer<const float>("result2");
+        std::vector<float> result1 = ctx.readBuffer<float>("result1");
+        std::vector<float> result2 = ctx.readBuffer<float>("result2");
         for (uint32_t i = 0; i < N; ++i)
         {
             float LambdaPos = result1[i];
@@ -397,8 +387,6 @@ GPU_TEST(MicrofacetLambdaNonsymmetry)
             float diff = std::abs(lhs - rhs);
             EXPECT_LT(diff, 1e-3f);
         }
-        ctx.unmapBuffer("result1");
-        ctx.unmapBuffer("result2");
     }
 }
 
@@ -407,7 +395,7 @@ GPU_TEST(MicrofacetG1Symmetry)
     // Test the symmetry of the Smith bistatic shadowing function G1.
     for (uint32_t t = 0; t < kNdfs.size(); ++t)
     {
-        Program::DefineList defines;
+        DefineList defines;
         defines.add("TEST_NDF_TYPE", kNdfs[t]);
         ctx.createProgram(kShaderFile, "g1Symmetry", defines);
 
@@ -424,8 +412,8 @@ GPU_TEST(MicrofacetG1Symmetry)
         ctx.allocateStructuredBuffer("result2", N);
 
         ctx.runProgram(N, 1, 1);
-        const float* result1 = ctx.mapBuffer<const float>("result1");
-        const float* result2 = ctx.mapBuffer<const float>("result2");
+        std::vector<float> result1 = ctx.readBuffer<float>("result1");
+        std::vector<float> result2 = ctx.readBuffer<float>("result2");
         for (uint32_t i = 0; i < N; ++i)
         {
             float g1Pos = result1[i];
@@ -433,8 +421,6 @@ GPU_TEST(MicrofacetG1Symmetry)
             float diff = std::abs(g1Pos - g1Neg);
             EXPECT_LT(diff, 1e-3f);
         }
-        ctx.unmapBuffer("result1");
-        ctx.unmapBuffer("result2");
     }
 }
 

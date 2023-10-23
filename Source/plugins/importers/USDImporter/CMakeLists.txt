@@ -5,24 +5,13 @@ endif()
 add_plugin(USDImporter)
 
 target_sources(USDImporter PRIVATE
-    CreateSpecularTexture.cs.slang
-    CreateSpecularTransmissionTexture.cs.slang
     ImporterContext.cpp
     ImporterContext.h
-    PackBaseColorAlpha.cs.slang
-    PreviewSurfaceConverter.cpp
-    PreviewSurfaceConverter.h
-    SampleTexture.slang
-    StandardMaterialSpec.h
-    Subdivision.cpp
-    Subdivision.h
-    USDHelpers.h
     USDImporter.cpp
     USDImporter.h
-    Utils.h
 )
 
-target_link_libraries(USDImporter PRIVATE nv-usd opensubdiv)
+target_link_libraries(USDImporter PRIVATE nv-usd USDUtils)
 
 target_copy_shaders(USDImporter plugins/importers/USDImporter)
 

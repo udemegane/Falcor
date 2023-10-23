@@ -33,7 +33,7 @@ import Utils.Math.MathHelpers;
 
 /** Implementation of a simple cloth BSDF.
 */
-struct ClothMaterialInstance : IMaterialInstance
+struct ClothMaterialInstance : MaterialInstanceBase, IMaterialInstance
 {
     ShadingFrame sf;            ///< Shading frame in world space.
     ClothBRDF brdf;
@@ -49,7 +49,15 @@ struct ClothMaterialInstance : IMaterialInstance
         float3 wiLocal = sf.toLocal(sd.V);
         float3 woLocal = sf.toLocal(wo);
 
+        if (!isValidHemisphereReflection(sd, sf, wiLocal, woLocal, wo)) return float3(0.f);
+
         return brdf.eval(wiLocal, woLocal, sg);
+    }
+
+    [Differentiable]
+    float3 evalAD<S : ISampleGenerator>(const DiffMaterialData diffData, const ShadingData sd, const float3 wo, inout S sg)
+    {
+        return float3(0.f);
     }
 
     bool sample<S : ISampleGenerator>(const ShadingData sd, inout S sg, out BSDFSample result, bool useImportanceSampling = true)
@@ -98,10 +106,10 @@ struct ClothMaterialInstance : IMaterialInstance
     {
         float3 wiLocal = sf.toLocal(sd.V);
         float3 woLocal = sample_cosine_hemisphere_concentric(sampleNext2D(sg), result.pdf); // pdf = cos(theta) / pi
-
-        if (min(wiLocal.z, woLocal.z) < kMinCosTheta || result.pdf == 0.f) return false;
-
         result.wo = sf.fromLocal(woLocal);
+
+        if (!isValidHemisphereReflection(sd, sf, wiLocal, woLocal, result.wo) || result.pdf == 0.f) return false;
+
         result.weight = brdf.eval(wiLocal, woLocal, sg) / result.pdf;
         result.lobeType = (uint)LobeType::DiffuseReflection;
 
@@ -118,7 +126,7 @@ struct ClothMaterialInstance : IMaterialInstance
         float3 wiLocal = sf.toLocal(sd.V);
         float3 woLocal = sf.toLocal(wo);
 
-        if (min(wiLocal.z, woLocal.z) < kMinCosTheta) return 0.f;
+        if (!isValidHemisphereReflection(sd, sf, wiLocal, woLocal, wo)) return 0.f;
 
         return woLocal.z * M_1_PI; // pdf = cos(theta) / pi
     }

@@ -35,7 +35,7 @@ import Scene.Scene;
 
 /** Implementation of the BSDF for the measured RGL material.
 */
-struct RGLMaterialInstance : IMaterialInstance
+struct RGLMaterialInstance : MaterialInstanceBase, IMaterialInstance
 {
     ShadingFrame sf;            ///< Shading frame in world space.
     float2 slice;
@@ -75,10 +75,7 @@ struct RGLMaterialInstance : IMaterialInstance
         float3 wiLocal = sf.toLocal(sd.V);
         float3 woLocal = sf.toLocal(wo);
 
-        if (min(wiLocal.z, woLocal.z) < kMinCosTheta)
-        {
-            return float3(0.0f);
-        }
+        if (!isValidHemisphereReflection(sd, sf, wiLocal, woLocal, wo)) return float3(0.f);
 
         uint4 ndfsSize = unpackSize(ndfVndfSize);
         uint4 lumiSize = unpackSize(this.lumiSize);
@@ -101,6 +98,12 @@ struct RGLMaterialInstance : IMaterialInstance
         float3 f = sigma == 0.0f ? 0.0f : fr * ndf.eval(unitH) / (4.0f * sigma);
 
         return f;
+    }
+
+    [Differentiable]
+    float3 evalAD<S : ISampleGenerator>(const DiffMaterialData diffData, const ShadingData sd, const float3 wo, inout S sg)
+    {
+        return float3(0.f);
     }
 
     bool sample<S : ISampleGenerator>(const ShadingData sd, inout S sg, out BSDFSample result, bool useImportanceSampling = true)
@@ -144,9 +147,11 @@ struct RGLMaterialInstance : IMaterialInstance
         float3 f = sigma == 0.0f ? 0.0f : fr * ndf.eval(unitH) / (4.0f * sigma);
         float pdf = nvdfSamplePdf.z * lumiSamplePdf.z / jacobian;
 
-        if (jacobian == 0.0f || pdf == 0.0f) return false;
-
         result.wo = sf.fromLocal(woLocal);
+
+        if (jacobian == 0.0f || pdf == 0.0f) return false;
+        if (!isValidHemisphereReflection(sd, sf, wiLocal, woLocal, result.wo)) return false;
+
         result.pdf = pdf;
         result.weight = f / pdf;
         result.lobeType = (uint)LobeType::DiffuseReflection;
@@ -159,10 +164,7 @@ struct RGLMaterialInstance : IMaterialInstance
         float3 wiLocal = sf.toLocal(sd.V);
         float3 woLocal = sf.toLocal(wo);
 
-        if (min(wiLocal.z, woLocal.z) < kMinCosTheta)
-        {
-            return 0.0f;
-        }
+        if (!isValidHemisphereReflection(sd, sf, wiLocal, woLocal, wo)) return 0.f;
 
         uint4 ndfsSize = unpackSize(ndfVndfSize);
         uint4 lumiSize = unpackSize(this.lumiSize);

@@ -28,6 +28,8 @@
 #include "Material.h"
 #include "BasicMaterial.h"
 #include "MaterialSystem.h"
+#include "MaterialTypeRegistry.h"
+#include "GlobalState.h"
 #include "Core/API/Device.h"
 #include "Utils/Logger.h"
 #include "Utils/Scripting/ScriptBindings.h"
@@ -38,8 +40,8 @@ namespace Falcor
     namespace
     {
         static_assert(sizeof(TextureHandle) == 4);
-        static_assert(sizeof(MaterialHeader) == 8);
-        static_assert(sizeof(MaterialPayload) == 120);
+        static_assert(sizeof(MaterialHeader) == 16);
+        static_assert(sizeof(MaterialPayload) == 112);
         static_assert(sizeof(MaterialDataBlob) == 128);
         static_assert(static_cast<uint32_t>(MaterialType::BuiltinCount) <= (1u << MaterialHeader::kMaterialTypeBits), "MaterialType count exceeds the maximum");
         static_assert(static_cast<uint32_t>(AlphaMode::Count) <= (1u << MaterialHeader::kAlphaModeBits), "AlphaMode bit count exceeds the maximum");
@@ -47,22 +49,25 @@ namespace Falcor
         static_assert(static_cast<uint32_t>(TextureHandle::Mode::Count) <= (1u << TextureHandle::kModeBits), "TextureHandle::Mode bit count exceeds the maximum");
         static_assert(MaterialHeader::kTotalHeaderBitsX <= 32, "MaterialHeader bit count x exceeds the maximum");
         static_assert(MaterialHeader::kTotalHeaderBitsY <= 32, "MaterialHeader bit count y exceeds the maximum");
+        static_assert(MaterialHeader::kTotalHeaderBitsZ <= 32, "MaterialHeader bit count z exceeds the maximum");
+        static_assert(MaterialHeader::kTotalHeaderBitsW <= 32, "MaterialHeader bit count w exceeds the maximum");
         static_assert(MaterialHeader::kAlphaThresholdBits == 16, "MaterialHeader alpha threshold bit count must be 16");
     }
 
     bool operator==(const MaterialHeader& lhs, const MaterialHeader& rhs)
     {
-        return lhs.packedData == rhs.packedData;
+        return all(lhs.packedData == rhs.packedData);
     }
 
-    Material::Material(std::shared_ptr<Device> pDevice, const std::string& name, MaterialType type)
-        : mpDevice(std::move(pDevice))
+    Material::Material(ref<Device> pDevice, const std::string& name, MaterialType type)
+        : mpDevice(pDevice)
         , mName(name)
     {
         mHeader.setMaterialType(type);
         mHeader.setAlphaMode(AlphaMode::Opaque);
-        mHeader.setAlphaThreshold(float16_t(0.5f));
+        mHeader.setAlphaThreshold(0.5h);
         mHeader.setActiveLobes(static_cast<uint32_t>(LobeType::All));
+        mHeader.setIoR(1.h);
     }
 
     bool Material::renderUI(Gui::Widgets& widget)
@@ -145,6 +150,15 @@ namespace Falcor
         }
     }
 
+    void Material::setIndexOfRefraction(float IoR)
+    {
+        if (mHeader.getIoR() != (float16_t)IoR)
+        {
+            mHeader.setIoR((float16_t)IoR);
+            markUpdates(UpdateFlags::DataChanged);
+        }
+    }
+
     const Material::TextureSlotInfo& Material::getTextureSlotInfo(const TextureSlot slot) const
     {
         FALCOR_ASSERT((size_t)slot < mTextureSlotInfo.size());
@@ -157,7 +171,7 @@ namespace Falcor
         return mTextureSlotData[(size_t)slot].pTexture != nullptr;
     }
 
-    bool Material::setTexture(const TextureSlot slot, const Texture::SharedPtr& pTexture)
+    bool Material::setTexture(const TextureSlot slot, const ref<Texture>& pTexture)
     {
         if (!hasTextureSlot(slot))
         {
@@ -171,10 +185,13 @@ namespace Falcor
         mTextureSlotData[(size_t)slot].pTexture = pTexture;
 
         markUpdates(UpdateFlags::ResourcesChanged);
+        if (slot == TextureSlot::Emissive)
+            markUpdates(UpdateFlags::EmissiveChanged);
+
         return true;
     }
 
-    Texture::SharedPtr Material::getTexture(const TextureSlot slot) const
+    ref<Texture> Material::getTexture(const TextureSlot slot) const
     {
         if (!hasTextureSlot(slot)) return nullptr;
 
@@ -190,20 +207,17 @@ namespace Falcor
             return false;
         }
 
-        std::filesystem::path fullPath;
-        if (findFileInDataDirectories(path, fullPath))
+        auto texture = Texture::createFromFile(mpDevice, path, true, useSrgb && getTextureSlotInfo(slot).srgb);
+        if (texture)
         {
-            auto texture = Texture::createFromFile(mpDevice.get(), fullPath, true, useSrgb && getTextureSlotInfo(slot).srgb);
-            if (texture)
-            {
-                setTexture(slot, texture);
-                // Flush and sync in order to prevent the upload heap from growing too large. Doing so after
-                // every texture creation is overly conservative, and will likely lead to performance issues
-                // due to the forced CPU/GPU sync.
-                mpDevice->flushAndSync();
-                return true;
-            }
+            setTexture(slot, texture);
+            // Wait for GPU to finish to prevent the upload heap from growing too large. Doing so after
+            // every texture creation is overly conservative, and will likely lead to performance issues
+            // due to the forced CPU/GPU sync.
+            mpDevice->wait();
+            return true;
         }
+
         return false;
     }
 
@@ -223,12 +237,12 @@ namespace Falcor
         mTextureTransform = textureTransform;
     }
 
-    std::shared_ptr<BasicMaterial> Material::toBasicMaterial()
+    ref<BasicMaterial> Material::toBasicMaterial()
     {
         if (mHeader.isBasicMaterial())
         {
-            FALCOR_ASSERT(std::dynamic_pointer_cast<BasicMaterial>(shared_from_this()));
-            return std::static_pointer_cast<BasicMaterial>(shared_from_this());
+            FALCOR_ASSERT(dynamic_ref_cast<BasicMaterial>(ref<Material>(this)));
+            return static_ref_cast<BasicMaterial>(ref<Material>(this));
         }
         return nullptr;
     }
@@ -242,23 +256,23 @@ namespace Falcor
         if (mUpdateCallback) mUpdateCallback(updates);
     }
 
-    void Material::updateTextureHandle(MaterialSystem* pOwner, const Texture::SharedPtr& pTexture, TextureHandle& handle)
+    void Material::updateTextureHandle(MaterialSystem* pOwner, const ref<Texture>& pTexture, TextureHandle& handle)
     {
         TextureHandle prevHandle = handle;
 
         // Update the given texture handle.
         if (pTexture)
         {
-            auto h = pOwner->getTextureManager()->addTexture(pTexture);
+            auto h = pOwner->getTextureManager().addTexture(pTexture);
             FALCOR_ASSERT(h);
-            handle.setTextureID(h.getID());
-            handle.setMode(TextureHandle::Mode::Texture);
+            handle = h.toGpuHandle();
         }
         else
         {
             handle.setMode(TextureHandle::Mode::Uniform);
+            handle.setUdimEnabled(false);
         }
-        handle.setUdimEnabled(false);
+        FALCOR_ASSERT(!handle.getUdimEnabled());
 
         if (handle != prevHandle) mUpdates |= Material::UpdateFlags::DataChanged;
     }
@@ -267,9 +281,17 @@ namespace Falcor
     {
         auto pTexture = getTexture(slot);
         updateTextureHandle(pOwner, pTexture, handle);
-    };
 
-    void Material::updateDefaultTextureSamplerID(MaterialSystem* pOwner, const Sampler::SharedPtr& pSampler)
+        // The base color texture potentially contains the alpha mask in it's alpha channel.
+        // Set it as the alpha texture handle in the material header.
+        if (slot == TextureSlot::BaseColor)
+        {
+            mHeader.setAlphaTextureHandle(handle);
+            mUpdates |= Material::UpdateFlags::DataChanged;
+        }
+    }
+
+    void Material::updateDefaultTextureSamplerID(MaterialSystem* pOwner, const ref<Sampler>& pSampler)
     {
         const uint32_t samplerID = pOwner->addTextureSampler(pSampler);
 
@@ -306,7 +328,7 @@ namespace Falcor
         return true;
     }
 
-    NormalMapType Material::detectNormalMapType(const Texture::SharedPtr& pNormalMap)
+    NormalMapType Material::detectNormalMapType(const ref<Texture>& pNormalMap)
     {
         NormalMapType type = NormalMapType::None;
         if (pNormalMap != nullptr)
@@ -332,6 +354,7 @@ namespace Falcor
         using namespace pybind11::literals;
 
         FALCOR_SCRIPT_BINDING_DEPENDENCY(Transform)
+        FALCOR_SCRIPT_BINDING_DEPENDENCY(Texture)
 
         pybind11::enum_<MaterialType> materialType(m, "MaterialType");
         materialType.value("Standard", MaterialType::Standard);
@@ -362,7 +385,7 @@ namespace Falcor
 
         // Register Material base class as IMaterial in python to allow deprecated script syntax.
         // TODO: Remove workaround when all scripts have been updated to create derived Material classes.
-        pybind11::class_<Material, Material::SharedPtr> material(m, "IMaterial"); // PYTHONDEPRECATED
+        pybind11::class_<Material, ref<Material>> material(m, "IMaterial"); // PYTHONDEPRECATED
         material.def_property_readonly("type", &Material::getType);
         material.def_property("name", &Material::getName, &Material::setName);
         material.def_property("doubleSided", &Material::isDoubleSided, &Material::setDoubleSided);
@@ -375,7 +398,35 @@ namespace Falcor
 
         material.def("setTexture", &Material::setTexture, "slot"_a, "texture"_a);
         material.def("getTexture", &Material::getTexture, "slot"_a);
-        material.def("loadTexture", &Material::loadTexture, "slot"_a, "path"_a, "useSrgb"_a = true);
+        auto loadTexture = [&](Material& self, Material::TextureSlot slot, const std::filesystem::path& path, bool useSrgb) {
+            return self.loadTexture(slot, getActiveAssetResolver().resolvePath(path), useSrgb);
+        };
+        material.def("loadTexture", loadTexture, "slot"_a, "path"_a, "useSrgb"_a = true); // PYTHONDEPRECATED
+        material.def("load_texture", loadTexture, "slot"_a, "path"_a, "use_srgb"_a = true); // PYTHONDEPRECATED
         material.def("clearTexture", &Material::clearTexture, "slot"_a);
+
+        auto getMaterialParamLayoutDict = [&](MaterialType type) -> pybind11::dict {
+            MaterialParamLayout layout = getMaterialParamLayout(type);
+            pybind11::dict dict;
+            for (const auto& entry : layout)
+                dict[entry.pythonName] = pybind11::dict("offset"_a = entry.offset, "size"_a = entry.size);
+            return dict;
+        };
+
+        auto getMaterialParamLayoutsDict = [getMaterialParamLayoutDict]() -> pybind11::dict {
+            pybind11::dict dict;
+            for (uint32_t i = 0; i < uint32_t(MaterialType::BuiltinCount); ++i)
+            {
+                auto type = static_cast<MaterialType>(i);
+                auto name = to_string(type);
+                dict[name.c_str()] = getMaterialParamLayoutDict(type);
+            }
+            return dict;
+        };
+
+        material.attr("PARAM_COUNT") = SerializedMaterialParams::kParamCount;
+
+        m.def("get_material_param_layout", getMaterialParamLayoutDict, "type"_a);
+        m.attr("MATERIAL_PARAM_LAYOUTS") = getMaterialParamLayoutsDict();
     }
 }

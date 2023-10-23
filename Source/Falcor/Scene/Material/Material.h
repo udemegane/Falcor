@@ -29,8 +29,11 @@
 #include "MaterialData.slang"
 #include "TextureHandle.slang"
 #include "MaterialTypeRegistry.h"
+#include "MaterialParamLayout.h"
+#include "SerializedMaterialParams.h"
 #include "Core/Macros.h"
-#include "Core/Errors.h"
+#include "Core/Error.h"
+#include "Core/Object.h"
 #include "Core/API/Formats.h"
 #include "Core/API/Texture.h"
 #include "Core/API/Sampler.h"
@@ -51,13 +54,10 @@ namespace Falcor
 
     /** Abstract base class for materials.
     */
-    class FALCOR_API Material : public std::enable_shared_from_this<Material>
+    class FALCOR_API Material : public Object
     {
+        FALCOR_OBJECT(Material)
     public:
-        // While this is an abstract base class, we still need a holder type (shared_ptr)
-        // for pybind11 bindings to work on inherited types.
-        using SharedPtr = std::shared_ptr<Material>;
-
         /** Flags indicating if and what was updated in the material.
         */
         enum class UpdateFlags : uint32_t
@@ -67,6 +67,7 @@ namespace Falcor
             DataChanged         = 0x2,  ///< Material data (parameters) changed.
             ResourcesChanged    = 0x4,  ///< Material resources (textures, buffers, samplers) changed.
             DisplacementChanged = 0x8,  ///< Displacement mapping parameters changed (only for materials that support displacement).
+            EmissiveChanged     = 0x10, ///< Material emissive properties changed.
         };
 
         /** Texture slots available for use.
@@ -99,7 +100,7 @@ namespace Falcor
 
         struct TextureSlotData
         {
-            Texture::SharedPtr  pTexture;                           ///< Texture bound to texture slot.
+            ref<Texture>  pTexture;                           ///< Texture bound to texture slot.
 
             bool hasData() const { return pTexture != nullptr; }
             bool operator==(const TextureSlotData& rhs) const { return pTexture == rhs.pTexture; }
@@ -151,11 +152,16 @@ namespace Falcor
         */
         virtual bool isEmissive() const { return mHeader.isEmissive(); }
 
+        /** Returns true if the material is dynamic.
+            Dynamic materials are updated every frame, otherwise `update()` is called reactively upon changes.
+        */
+        virtual bool isDynamic() const { return false; }
+
         /** Compares material to another material.
             \param[in] pOther Other material.
             \return true if all materials properties *except* the name are identical.
         */
-        virtual bool isEqual(const Material::SharedPtr& pOther) const = 0;
+        virtual bool isEqual(const ref<Material>& pOther) const = 0;
 
         /** Set the double-sided flag. This flag doesn't affect the cull state, just the shading.
         */
@@ -189,6 +195,10 @@ namespace Falcor
         */
         virtual float getAlphaThreshold() const { return (float)mHeader.getAlphaThreshold(); }
 
+        /** Get the alpha mask texture handle.
+        */
+        virtual TextureHandle getAlphaTextureHandle() const { return mHeader.getAlphaTextureHandle(); }
+
         /** Set the nested priority used for nested dielectrics.
         */
         virtual void setNestedPriority(uint32_t priority);
@@ -197,6 +207,14 @@ namespace Falcor
             \return Nested priority, with 0 reserved for the highest possible priority.
         */
         virtual uint32_t getNestedPriority() const { return mHeader.getNestedPriority(); }
+
+        /** Set the index of refraction.
+        */
+        virtual void setIndexOfRefraction(float IoR);
+
+        /** Get the index of refraction.
+        */
+        virtual float getIndexOfRefraction() const { return (float)mHeader.getIoR(); }
 
         /** Get information about a texture slot.
             \param[in] slot The texture slot.
@@ -216,7 +234,7 @@ namespace Falcor
             \param[in] pTexture The texture.
             \return True if the texture slot was changed, false otherwise.
         */
-        virtual bool setTexture(const TextureSlot slot, const Texture::SharedPtr& pTexture);
+        virtual bool setTexture(const TextureSlot slot, const ref<Texture>& pTexture);
 
         /** Load one of the available texture slots.
             The call is ignored with a warning if the slot doesn't exist.
@@ -237,7 +255,7 @@ namespace Falcor
             \param[in] The texture slot.
             \return Texture object if bound, or nullptr if unbound or slot doesn't exist.
         */
-        virtual Texture::SharedPtr getTexture(const TextureSlot slot) const;
+        virtual ref<Texture> getTexture(const TextureSlot slot) const;
 
         /** Optimize texture usage for the given texture slot.
             This function may replace constant textures by uniform material parameters etc.
@@ -253,11 +271,11 @@ namespace Falcor
 
         /** Set the default texture sampler for the material.
         */
-        virtual void setDefaultTextureSampler(const Sampler::SharedPtr& pSampler) {}
+        virtual void setDefaultTextureSampler(const ref<Sampler>& pSampler) {}
 
         /** Get the default texture sampler for the material.
         */
-        virtual Sampler::SharedPtr getDefaultTextureSampler() const { return nullptr; }
+        virtual ref<Sampler> getDefaultTextureSampler() const { return nullptr; }
 
         /** Set the material texture transform.
         */
@@ -283,21 +301,21 @@ namespace Falcor
             The shader modules must be added to any program using the material.
             \return List of shader modules.
         */
-        virtual Program::ShaderModuleList getShaderModules() const = 0;
+        virtual ProgramDesc::ShaderModuleList getShaderModules() const = 0;
 
         /** Get type conformances for the material.
             The type conformances must be set on any program using the material.
         */
-        virtual Program::TypeConformanceList getTypeConformances() const = 0;
+        virtual TypeConformanceList getTypeConformances() const = 0;
 
         /** Get shader defines for the material.
             The defines must be set on any program using the material.
         */
-        virtual Program::DefineList getDefines() const { return {}; }
+        virtual DefineList getDefines() const { return {}; }
 
         /** Get the number of buffers used by this material.
         */
-        virtual int getBufferCount() const { return 0; }
+        virtual size_t getMaxBufferCount() const { return 0; }
 
         /** Returns the maximum number of textures this material will use.
             By default we use the number of texture slots. The reason for this is that,
@@ -306,30 +324,38 @@ namespace Falcor
         */
         virtual size_t getMaxTextureCount() const { return (size_t)Material::TextureSlot::Count; }
 
+        /** Get the number of 3D textures used by this material.
+        */
+        virtual size_t getMaxTexture3DCount() const { return 0; }
+
         // Temporary convenience function to downcast Material to BasicMaterial.
         // This is because a large portion of the interface hasn't been ported to the Material base class yet.
         // TODO: Remove this helper later
-        std::shared_ptr<BasicMaterial> toBasicMaterial();
+        ref<BasicMaterial> toBasicMaterial();
 
         /** Size of the material instance the material produces.
             Used to set `anyValueSize` on `IMaterialInstance` above the default (128B), for exceptionally large materials.
             Large material instances can have a singificant performance impact.
         */
-        virtual size_t getMaterialInstanceByteSize() { return 128; }
+        virtual size_t getMaterialInstanceByteSize() const { return 128; }
+
+        virtual const MaterialParamLayout& getParamLayout() const { FALCOR_THROW("Material does not have a parameter layout."); }
+        virtual SerializedMaterialParams serializeParams() const { FALCOR_THROW("Material does not support serializing parameters."); }
+        virtual void deserializeParams(const SerializedMaterialParams& params) { FALCOR_THROW("Material does not support deserializing parameters."); }
 
     protected:
-        Material(std::shared_ptr<Device> pDevice, const std::string& name, MaterialType type);
+        Material(ref<Device> pDevice, const std::string& name, MaterialType type);
 
         using UpdateCallback = std::function<void(Material::UpdateFlags)>;
         void registerUpdateCallback(const UpdateCallback& updateCallback) { mUpdateCallback = updateCallback; }
         void markUpdates(UpdateFlags updates);
         bool hasTextureSlotData(const TextureSlot slot) const;
-        void updateTextureHandle(MaterialSystem* pOwner, const Texture::SharedPtr& pTexture, TextureHandle& handle);
+        void updateTextureHandle(MaterialSystem* pOwner, const ref<Texture>& pTexture, TextureHandle& handle);
         void updateTextureHandle(MaterialSystem* pOwner, const TextureSlot slot, TextureHandle& handle);
-        void updateDefaultTextureSamplerID(MaterialSystem* pOwner, const Sampler::SharedPtr& pSampler);
+        void updateDefaultTextureSamplerID(MaterialSystem* pOwner, const ref<Sampler>& pSampler);
         bool isBaseEqual(const Material& other) const;
 
-        static NormalMapType detectNormalMapType(const Texture::SharedPtr& pNormalMap);
+        static NormalMapType detectNormalMapType(const ref<Texture>& pNormalMap);
 
         template<typename T>
         MaterialDataBlob prepareDataBlob(const T& data) const
@@ -342,7 +368,7 @@ namespace Falcor
             return blob;
         }
 
-        std::shared_ptr<Device> mpDevice;
+        ref<Device> mpDevice;
 
         std::string mName;                          ///< Name of the material.
         MaterialHeader mHeader;                     ///< Material header data available in all material types.
@@ -372,7 +398,7 @@ namespace Falcor
             tostr(Index);
 #undef tostr
         default:
-            throw ArgumentError("Invalid texture slot");
+            FALCOR_THROW("Invalid texture slot");
         }
     }
 

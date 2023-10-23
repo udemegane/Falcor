@@ -29,6 +29,7 @@
 
 #include "BrickedGrid.h"
 #include "Core/Macros.h"
+#include "Core/Object.h"
 #include "Core/API/Buffer.h"
 #include "Utils/Math/AABB.h"
 #include "Utils/Math/Matrix.h"
@@ -55,11 +56,10 @@ namespace Falcor
 
     /** Voxel grid based on NanoVDB.
     */
-    class FALCOR_API Grid
+    class FALCOR_API Grid : public Object
     {
+        FALCOR_OBJECT(Grid)
     public:
-        using SharedPtr = std::shared_ptr<Grid>;
-
         /** Create a sphere voxel grid.
             \param[in] pDevice GPU device.
             \param[in] radius Radius of the sphere in world units.
@@ -67,7 +67,7 @@ namespace Falcor
             \param[in] blendRange Range in voxels to blend from 0 to 1 (starting at surface inwards).
             \return A new grid.
         */
-        static SharedPtr createSphere(std::shared_ptr<Device> pDevice, float radius, float voxelSize, float blendRange = 2.f);
+        static ref<Grid> createSphere(ref<Device> pDevice, float radius, float voxelSize, float blendRange = 2.f);
 
         /** Create a box voxel grid.
             \param[in] pDevice GPU device.
@@ -78,16 +78,16 @@ namespace Falcor
             \param[in] blendRange Range in voxels to blend from 0 to 1 (starting at surface inwards).
             \return A new grid.
         */
-        static SharedPtr createBox(std::shared_ptr<Device> pDevice, float width, float height, float depth, float voxelSize, float blendRange = 2.f);
+        static ref<Grid> createBox(ref<Device> pDevice, float width, float height, float depth, float voxelSize, float blendRange = 2.f);
 
         /** Create a grid from a file.
             Currently only OpenVDB and NanoVDB grids of type float are supported.
             \param[in] pDevice GPU device.
-            \param[in] path File path of the grid. Can also include a full path or relative path from a data directory.
+            \param[in] path File path of the grid (absolute or relative to working directory).
             \param[in] gridname Name of the grid to load.
             \return A new grid, or nullptr if the grid failed to load.
         */
-        static SharedPtr createFromFile(std::shared_ptr<Device> pDevice, const std::filesystem::path& path, const std::string& gridname);
+        static ref<Grid> createFromFile(ref<Device> pDevice, const std::filesystem::path& path, const std::string& gridname);
 
         /** Render the UI.
         */
@@ -96,7 +96,7 @@ namespace Falcor
         /** Bind the grid to a given shader var.
             \param[in] var The shader variable to set the data into.
         */
-        void setShaderData(const ShaderVar& var);
+        void bindShaderData(const ShaderVar& var);
 
         /** Get the minimum index stored in the grid.
         */
@@ -138,26 +138,26 @@ namespace Falcor
 
         /** Get the (affine) NanoVDB transformation matrix.
         */
-        rmcv::mat4 getTransform() const;
+        float4x4 getTransform() const;
 
         /** Get the inverse (affine) NanoVDB transformation matrix.
         */
-        rmcv::mat4 getInvTransform() const;
+        float4x4 getInvTransform() const;
 
     private:
-        Grid(std::shared_ptr<Device> pDevice, nanovdb::GridHandle<nanovdb::HostBuffer> gridHandle);
+        Grid(ref<Device> pDevice, nanovdb::GridHandle<nanovdb::HostBuffer> gridHandle);
 
-        static SharedPtr createFromNanoVDBFile(std::shared_ptr<Device>, const std::filesystem::path& path, const std::string& gridname);
-        static SharedPtr createFromOpenVDBFile(std::shared_ptr<Device>, const std::filesystem::path& path, const std::string& gridname);
+        static ref<Grid> createFromNanoVDBFile(ref<Device>, const std::filesystem::path& path, const std::string& gridname);
+        static ref<Grid> createFromOpenVDBFile(ref<Device>, const std::filesystem::path& path, const std::string& gridname);
 
-        std::shared_ptr<Device> mpDevice;
+        ref<Device> mpDevice;
 
         // Host data.
         nanovdb::GridHandle<nanovdb::HostBuffer> mGridHandle;
         nanovdb::FloatGrid* mpFloatGrid;
         nanovdb::FloatGrid::AccessorType mAccessor;
         // Device data.
-        Buffer::SharedPtr mpBuffer;
+        ref<Buffer> mpBuffer;
         BrickedGrid mBrickedGrid;
 
         friend class SceneCache;

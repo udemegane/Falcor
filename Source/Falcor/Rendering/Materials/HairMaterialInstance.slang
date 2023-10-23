@@ -40,46 +40,54 @@ import Utils.Math.MathHelpers;
     By overriding the 'BCSDF' define it is possible to select a single-sided
     Lambertian diffuse BRDF for debugging purposes (see BCSDFConfig.slangh).
 */
-struct HairMaterialInstance : IMaterialInstance
+struct HairMaterialInstance : MaterialInstanceBase, IMaterialInstance
 {
+    ShadingFrame sf;    ///< Shading frame in world space.
     HairChiang16Data data;
 
-    __init(const HairChiang16Data data)
+    __init(const ShadingFrame sf, const HairChiang16Data data)
     {
+        this.sf = sf;
         this.data = data;
     }
 
     float3 eval<S : ISampleGenerator>(const ShadingData sd, const float3 wo, inout S sg)
     {
 #if BCSDF == HairChiang
-        float3 wiLocal = sd.toLocal(sd.V);
-        float3 woLocal = sd.toLocal(wo);
+        float3 wiLocal = sf.toLocal(sd.V);
+        float3 woLocal = sf.toLocal(wo);
 
         HairChiang16 bcsdf = HairChiang16(sd, data);
 
         return bcsdf.eval(wiLocal, woLocal, sg);
 #else
         // Diffuse BRDF
-        return data.baseColor * (float)M_1_PI * saturate(dot(sd.N, wo));
+        return data.baseColor * (float)M_1_PI * saturate(dot(sf.N, wo));
 #endif
+    }
+
+    [Differentiable]
+    float3 evalAD<S : ISampleGenerator>(const DiffMaterialData diffData, const ShadingData sd, const float3 wo, inout S sg)
+    {
+        return float3(0.f);
     }
 
     bool sample<S : ISampleGenerator>(const ShadingData sd, inout S sg, out BSDFSample result, bool useImportanceSampling = true)
     {
 #if BCSDF == HairChiang
-        float3 wiLocal = sd.toLocal(sd.V);
+        float3 wiLocal = sf.toLocal(sd.V);
         float3 woLocal = {};
 
         HairChiang16 bcsdf = HairChiang16(sd, data);
 
         bool valid = bcsdf.sample(wiLocal, woLocal, result.pdf, result.weight, result.lobeType, sg);
-        result.wo = sd.fromLocal(woLocal);
+        result.wo = sf.fromLocal(woLocal);
 
         return valid;
 #else
         // Diffuse BRDF
         float3 woLocal = sample_cosine_hemisphere_concentric(sampleNext2D(sg), result.pdf);
-        result.wo = sd.fromLocal(woLocal);
+        result.wo = sf.fromLocal(woLocal);
         result.weight = data.baseColor * (float)M_1_PI;
         result.lobeType = (uint)LobeType::DiffuseReflection;
         return true;
@@ -89,15 +97,15 @@ struct HairMaterialInstance : IMaterialInstance
     float evalPdf(const ShadingData sd, const float3 wo, bool useImportanceSampling = true)
     {
 #if BCSDF == HairChiang
-        float3 wiLocal = sd.toLocal(sd.V);
-        float3 woLocal = sd.toLocal(wo);
+        float3 wiLocal = sf.toLocal(sd.V);
+        float3 woLocal = sf.toLocal(wo);
 
         HairChiang16 bcsdf = HairChiang16(sd, data);
 
         return bcsdf.evalPdf(wiLocal, woLocal);
 #else
         // Diffuse BRDF
-        return saturate(dot(sd.N, wo));
+        return saturate(dot(sf.N, wo));
 #endif
     }
 
@@ -105,7 +113,7 @@ struct HairMaterialInstance : IMaterialInstance
     {
         BSDFProperties p = {};
 
-        p.guideNormal = sd.N;
+        p.guideNormal = sf.N;
 
         // Compute approximation of the perceived roughness.
         // It's an open problem how to best do this. For now assume a medium roughness.

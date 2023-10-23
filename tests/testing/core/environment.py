@@ -24,6 +24,30 @@ def validate_json(data, schema, full_name=None):
             elif prop_schema.get('optional', False) == False:
                 raise TypeError(f'Property "{name}" does not exist')
 
+
+def find_most_recent_build_config():
+    '''
+    Find the build config most recently built by checking all
+    possible build directories and finding the most recently
+    changed Falcor library.
+    '''
+    project_dir = Path(__file__).parents[3].resolve()
+
+    best_config_name = None
+    best_config_time = None
+
+    for config_name, config_values in config.BUILD_CONFIGS.items():
+        build_dir = project_dir / config_values["build_dir"]
+        falcor_lib = build_dir / config.FALCOR_LIB
+        if not os.path.exists(falcor_lib):
+            continue
+        stat = os.stat(falcor_lib)
+        if not best_config_name or stat.st_mtime >= best_config_time:
+            best_config_name = config_name
+            best_config_time = stat.st_mtime
+
+    return best_config_name
+
 class Environment:
     '''
     Holds a bunch of variables necessary to run the testing infrastructure.
@@ -33,6 +57,12 @@ class Environment:
         '''
         Loads the environment from the JSON file and sets up derived variables.
         '''
+
+        self.project_dir = Path(__file__).parents[3].resolve()
+
+        if json_file == None:
+            json_file = self.project_dir / config.DEFAULT_ENVIRONMENT
+
         # Load JSON config.
         if not Path(json_file).exists():
             raise Exception(f'Environment config file "{json_file}" not found.')
@@ -62,11 +92,10 @@ class Environment:
 
         # Validate build configuration.
         if not build_config in config.BUILD_CONFIGS.keys():
-            raise Exception(f'Invalid build configuration "{build_config}". Choose from: {", ".join(config.BUILD_CONFIGS.keys())}.')
+            raise Exception(f'Invalid build configuration "{build_config}".')
 
         # Setup environment variables.
         self.name = env['name']
-        self.project_dir = Path(__file__).parents[3].resolve()
         self.build_dir = self.project_dir / config.BUILD_CONFIGS[build_config]['build_dir']
         self.cmake_exe = self.project_dir / config.CMAKE_EXE
         # Ideally this information would be parsed from CMakePresets.json, rather than this roundabout way
@@ -76,6 +105,7 @@ class Environment:
         self.image_tests_result_dir = env['image_tests']['result_dir']
         self.image_tests_ref_dir = env['image_tests']['ref_dir']
         self.image_tests_remote_ref_dir = env['image_tests'].get('remote_ref_dir', None)
+        self.python_tests_dir = self.project_dir / config.PYTHON_TESTS_DIR
 
         self.build_config = build_config
         self.branch = helpers.get_git_head_branch(self.project_dir)
@@ -84,6 +114,7 @@ class Environment:
         self.falcor_test_exe = self.build_dir / config.FALCOR_TEST_EXE
         self.mogwai_exe = self.build_dir / config.MOGWAI_EXE
         self.image_compare_exe = self.build_dir / config.IMAGE_COMPARE_EXE
+        self.python_exe = self.build_dir / config.PYTHON_EXE
 
     def resolve_image_dir(self, image_dir, branch, build_id):
         '''

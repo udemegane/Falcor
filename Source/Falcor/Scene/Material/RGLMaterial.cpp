@@ -32,7 +32,7 @@
 #include "Utils/Logger.h"
 #include "Utils/Image/ImageIO.h"
 #include "Utils/Scripting/ScriptBindings.h"
-#include "Scene/SceneBuilderAccess.h"
+#include "GlobalState.h"
 #include "Rendering/Materials/BSDFIntegrator.h"
 #include <fstream>
 
@@ -50,25 +50,20 @@ namespace Falcor
         const std::string kLoadFile = "load";
     }
 
-    RGLMaterial::SharedPtr RGLMaterial::create(std::shared_ptr<Device> pDevice, const std::string& name, const std::filesystem::path& path)
-    {
-        return SharedPtr(new RGLMaterial(std::move(pDevice), name, path));
-    }
-
-    RGLMaterial::RGLMaterial(std::shared_ptr<Device> pDevice, const std::string& name, const std::filesystem::path& path)
-        : Material(std::move(pDevice), name, MaterialType::RGL)
+    RGLMaterial::RGLMaterial(ref<Device> pDevice, const std::string& name, const std::filesystem::path& path)
+        : Material(pDevice, name, MaterialType::RGL)
     {
         if (!loadBRDF(path))
         {
-            throw RuntimeError("RGLMaterial() - Failed to load BRDF from '{}'.", path);
+            FALCOR_THROW("RGLMaterial() - Failed to load BRDF from '{}'.", path);
         }
 
         // Create resources for albedo lookup table.
         Sampler::Desc desc;
-        desc.setFilterMode(Sampler::Filter::Linear, Sampler::Filter::Point, Sampler::Filter::Point);
-        desc.setAddressingMode(Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp);
+        desc.setFilterMode(TextureFilteringMode::Linear, TextureFilteringMode::Point, TextureFilteringMode::Point);
+        desc.setAddressingMode(TextureAddressingMode::Clamp, TextureAddressingMode::Clamp, TextureAddressingMode::Clamp);
         desc.setMaxAnisotropy(1);
-        mpSampler = Sampler::create(mpDevice.get(), desc);
+        mpSampler = mpDevice->createSampler(desc);
 
         prepareAlbedoLUT(mpDevice->getRenderContext());
     }
@@ -77,7 +72,7 @@ namespace Falcor
     {
         widget.text("RGL BRDF " + mBRDFName);
         widget.text(mBRDFDescription);
-        widget.tooltip("Full path the BRDF was loaded from:\n" + mFilePath.string(), true);
+        widget.tooltip("Full path the BRDF was loaded from:\n" + mPath.string(), true);
 
         return false;
     }
@@ -89,7 +84,7 @@ namespace Falcor
         auto flags = Material::UpdateFlags::None;
         if (mUpdates != Material::UpdateFlags::None)
         {
-            auto checkBuffer = [&](Buffer::SharedPtr& buf, uint& handle)
+            auto checkBuffer = [&](ref<Buffer>& buf, uint& handle)
             {
                 // If a BRDF was already loaded and we're just updating data,
                 // then buffer handles are already assigned.
@@ -127,37 +122,30 @@ namespace Falcor
         return flags;
     }
 
-    bool RGLMaterial::isEqual(const Material::SharedPtr& pOther) const
+    bool RGLMaterial::isEqual(const ref<Material>& pOther) const
     {
-        auto other = std::dynamic_pointer_cast<RGLMaterial>(pOther);
+        auto other = dynamic_ref_cast<RGLMaterial>(pOther);
         if (!other) return false;
 
         if (!isBaseEqual(*other)) return false;
-        if (mFilePath != other->mFilePath) return false;
+        if (mPath != other->mPath) return false;
 
         return true;
     }
 
-    Program::ShaderModuleList RGLMaterial::getShaderModules() const
+    ProgramDesc::ShaderModuleList RGLMaterial::getShaderModules() const
     {
-        return { Program::ShaderModule(kShaderFile) };
+        return { ProgramDesc::ShaderModule::fromFile(kShaderFile) };
     }
 
-    Program::TypeConformanceList RGLMaterial::getTypeConformances() const
+    TypeConformanceList RGLMaterial::getTypeConformances() const
     {
         return { {{"RGLMaterial", "IMaterial"}, (uint32_t)MaterialType::RGL} };
     }
 
     bool RGLMaterial::loadBRDF(const std::filesystem::path& path)
     {
-        std::filesystem::path fullPath;
-        if (!findFileInDataDirectories(path, fullPath))
-        {
-            logWarning("RGLMaterial::loadBRDF() - Can't find file '{}'.", path);
-            return false;
-        }
-
-        std::ifstream ifs(fullPath, std::ios_base::in | std::ios_base::binary);
+        std::ifstream ifs(path, std::ios_base::in | std::ios_base::binary);
         if (!ifs.good())
         {
             logWarning("RGLMaterial::loadBRDF() - Failed to open file '{}'.", path);
@@ -198,8 +186,8 @@ namespace Falcor
             return false;
         }
 
-        mFilePath = fullPath;
-        mBRDFName = std::filesystem::path(fullPath).stem().string();
+        mPath = path;
+        mBRDFName = std::filesystem::path(path).stem().string();
         mBRDFDescription = file->data().description;
 
         mData.phiSize = uint(phi->shape[0]);
@@ -217,18 +205,18 @@ namespace Falcor
         SamplableDistribution4D vndfDist(reinterpret_cast<float*>(vndf->data.get()), vndfSize);
         SamplableDistribution4D lumiDist(reinterpret_cast<float*>(lumi->data.get()), lumiSize);
 
-        mpVNDFMarginalBuf    = Buffer::create(mpDevice.get(), prod3(vndfSize) * 4, ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, vndfDist.getMarginal());
-        mpLumiMarginalBuf    = Buffer::create(mpDevice.get(), prod3(lumiSize) * 4, ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, lumiDist.getMarginal());
-        mpVNDFConditionalBuf = Buffer::create(mpDevice.get(), prod4(vndfSize) * 4, ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, vndfDist.getConditional());
-        mpLumiConditionalBuf = Buffer::create(mpDevice.get(), prod4(lumiSize) * 4, ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, lumiDist.getConditional());
+        mpVNDFMarginalBuf    = mpDevice->createBuffer(prod3(vndfSize) * 4, ResourceBindFlags::ShaderResource, MemoryType::DeviceLocal, vndfDist.getMarginal());
+        mpLumiMarginalBuf    = mpDevice->createBuffer(prod3(lumiSize) * 4, ResourceBindFlags::ShaderResource, MemoryType::DeviceLocal, lumiDist.getMarginal());
+        mpVNDFConditionalBuf = mpDevice->createBuffer(prod4(vndfSize) * 4, ResourceBindFlags::ShaderResource, MemoryType::DeviceLocal, vndfDist.getConditional());
+        mpLumiConditionalBuf = mpDevice->createBuffer(prod4(lumiSize) * 4, ResourceBindFlags::ShaderResource, MemoryType::DeviceLocal, lumiDist.getConditional());
 
-        mpThetaBuf = Buffer::create(mpDevice.get(), theta->numElems * sizeof(float), ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, theta->data.get());
-        mpPhiBuf   = Buffer::create(mpDevice.get(), phi  ->numElems * sizeof(float), ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, phi  ->data.get());
-        mpSigmaBuf = Buffer::create(mpDevice.get(), sigma->numElems * sizeof(float), ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, sigma->data.get());
-        mpNDFBuf   = Buffer::create(mpDevice.get(), ndf  ->numElems * sizeof(float), ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, ndf  ->data.get());
-        mpVNDFBuf  = Buffer::create(mpDevice.get(), vndf ->numElems * sizeof(float), ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, vndfDist.getPDF());
-        mpLumiBuf  = Buffer::create(mpDevice.get(), lumi ->numElems * sizeof(float), ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, lumiDist.getPDF());
-        mpRGBBuf   = Buffer::create(mpDevice.get(), rgb  ->numElems * sizeof(float), ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, rgb  ->data.get());
+        mpThetaBuf = mpDevice->createBuffer(theta->numElems * sizeof(float), ResourceBindFlags::ShaderResource, MemoryType::DeviceLocal, theta->data.get());
+        mpPhiBuf   = mpDevice->createBuffer(phi  ->numElems * sizeof(float), ResourceBindFlags::ShaderResource, MemoryType::DeviceLocal, phi  ->data.get());
+        mpSigmaBuf = mpDevice->createBuffer(sigma->numElems * sizeof(float), ResourceBindFlags::ShaderResource, MemoryType::DeviceLocal, sigma->data.get());
+        mpNDFBuf   = mpDevice->createBuffer(ndf  ->numElems * sizeof(float), ResourceBindFlags::ShaderResource, MemoryType::DeviceLocal, ndf  ->data.get());
+        mpVNDFBuf  = mpDevice->createBuffer(vndf ->numElems * sizeof(float), ResourceBindFlags::ShaderResource, MemoryType::DeviceLocal, vndfDist.getPDF());
+        mpLumiBuf  = mpDevice->createBuffer(lumi ->numElems * sizeof(float), ResourceBindFlags::ShaderResource, MemoryType::DeviceLocal, lumiDist.getPDF());
+        mpRGBBuf   = mpDevice->createBuffer(rgb  ->numElems * sizeof(float), ResourceBindFlags::ShaderResource, MemoryType::DeviceLocal, rgb  ->data.get());
 
         markUpdates(Material::UpdateFlags::ResourcesChanged);
 
@@ -239,14 +227,14 @@ namespace Falcor
 
     void RGLMaterial::prepareAlbedoLUT(RenderContext* pRenderContext) // TODO
     {
-        const auto texPath = mFilePath.replace_extension("dds");
+        const auto texPath = mPath.replace_extension("dds");
 
         // Try loading albedo lookup table.
         if (std::filesystem::is_regular_file(texPath))
         {
             // Load 1D texture in non-SRGB format, no mips.
             // If successful, verify dimensions/format/etc. match the expectations.
-            mpAlbedoLUT = Texture::createFromFile(mpDevice.get(), texPath.string(), false, false, ResourceBindFlags::ShaderResource);
+            mpAlbedoLUT = Texture::createFromFile(mpDevice, texPath.string(), false, false, ResourceBindFlags::ShaderResource);
 
             if (mpAlbedoLUT)
             {
@@ -281,14 +269,14 @@ namespace Falcor
         for (uint32_t i = 0; i < kAlbedoLUTSize; i++) cosThetas[i] = (float)(i + 1) / kAlbedoLUTSize;
 
         // Create copy of material to avoid changing our local state.
-        auto pMaterial = SharedPtr(new RGLMaterial(*this));
+        auto pMaterial = make_ref<RGLMaterial>(*this);
 
         // Create and update scene containing the material.
         Scene::SceneData sceneData;
-        sceneData.pMaterials = MaterialSystem::create(mpDevice);
+        sceneData.pMaterials = std::make_unique<MaterialSystem>(mpDevice);
         MaterialID materialID = sceneData.pMaterials->addMaterial(pMaterial);
 
-        Scene::SharedPtr pScene = Scene::create(mpDevice, std::move(sceneData));
+        ref<Scene> pScene = Scene::create(mpDevice, std::move(sceneData));
         pScene->update(pRenderContext, 0.0);
 
         // Create BSDF integrator utility.
@@ -306,7 +294,7 @@ namespace Falcor
         for (uint32_t i = 0; i < kAlbedoLUTSize; i++) initData[i] = float4(albedos[i], 1.f);
 
         // Create albedo LUT texture.
-        mpAlbedoLUT = Texture::create2D(mpDevice.get(), kAlbedoLUTSize, 1, kAlbedoLUTFormat, 1, 1, initData.data(), ResourceBindFlags::ShaderResource);
+        mpAlbedoLUT = mpDevice->createTexture2D(kAlbedoLUTSize, 1, kAlbedoLUTFormat, 1, 1, initData.data(), ResourceBindFlags::ShaderResource);
     }
 
     FALCOR_SCRIPT_BINDING(RGLMaterial)
@@ -315,10 +303,10 @@ namespace Falcor
 
         FALCOR_SCRIPT_BINDING_DEPENDENCY(Material)
 
-        pybind11::class_<RGLMaterial, Material, RGLMaterial::SharedPtr> material(m, "RGLMaterial");
+        pybind11::class_<RGLMaterial, Material, ref<RGLMaterial>> material(m, "RGLMaterial");
         auto create = [] (const std::string& name, const std::filesystem::path& path)
         {
-            return RGLMaterial::create(getActivePythonSceneBuilder().getDevice(), name, path);
+            return RGLMaterial::create(accessActivePythonSceneBuilder().getDevice(), name, getActiveAssetResolver().resolvePath(path));
         };
         material.def(pybind11::init(create), "name"_a, "path"_a); // PYTHONDEPRECATED
         material.def(kLoadFile.c_str(), &RGLMaterial::loadBRDF, "path"_a);

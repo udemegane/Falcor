@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -28,18 +28,15 @@
 #include "Utils/Math/MathConstants.slangh"
 #include "Rendering/Materials/BSDFConfig.slangh"
 
-import Utils.Math.MathHelpers;
-import Utils.Color.ColorHelpers;
-__exported import Rendering.Materials.IBSDF;
 import Rendering.Materials.IsotropicGGX;
 import Rendering.Materials.Fresnel;
+__exported import Rendering.Materials.IBSDF;
 
 // Enable support for delta reflection/transmission.
 #define EnableDeltaBSDF 1
 
 // Enable GGX sampling using the distribution of visible normals (VNDF) instead of classic NDF sampling.
 // This should be the default as it has lower variance, disable for testing only.
-// TODO: Make default when transmission with VNDF sampling is properly validated
 #define EnableVNDFSampling 1
 
 // Enable explicitly computing sampling weights using eval(wi, wo) / evalPdf(wi, wo).
@@ -49,7 +46,7 @@ import Rendering.Materials.Fresnel;
 /**
  * Specular reflection using microfacets.
  */
-struct SpecularMicrofacetBRDF : IBSDF
+struct SpecularMicrofacetBRDF : IBSDF, IDifferentiable
 {
     float3 albedo;    ///< Specular albedo.
     float alpha;      ///< GGX width parameter.
@@ -57,6 +54,7 @@ struct SpecularMicrofacetBRDF : IBSDF
 
     bool hasLobe(LobeType lobeType) { return (activeLobes & (uint)lobeType) != 0; }
 
+    [Differentiable]
     float3 eval<S : ISampleGenerator>(const float3 wi, const float3 wo, inout S sg)
     {
         if (min(wi.z, wo.z) < kMinCosTheta)
@@ -195,7 +193,7 @@ struct SpecularMicrofacetBRDF : IBSDF
 /**
  * Specular reflection and transmission using microfacets.
  */
-struct SpecularMicrofacetBTDF : IBSDF
+struct SpecularMicrofacetBSDF : IBSDF, IDifferentiable
 {
     float3 transmissionAlbedo; ///< Transmission albedo.
     float alpha;               ///< GGX width parameter.
@@ -204,6 +202,7 @@ struct SpecularMicrofacetBTDF : IBSDF
 
     bool hasLobe(LobeType lobeType) { return (activeLobes & (uint)lobeType) != 0; }
 
+    [Differentiable]
     float3 eval<S : ISampleGenerator>(const float3 wi, const float3 wo, inout S sg)
     {
         if (min(wi.z, abs(wo.z)) < kMinCosTheta)

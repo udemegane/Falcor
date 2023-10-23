@@ -26,8 +26,9 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #include "PBRTDiffuseMaterial.h"
+#include "PBRTDiffuseMaterialParamLayout.slang"
 #include "Utils/Scripting/ScriptBindings.h"
-#include "Scene/SceneBuilderAccess.h"
+#include "GlobalState.h"
 
 namespace Falcor
 {
@@ -36,27 +37,37 @@ namespace Falcor
         const char kShaderFile[] = "Rendering/Materials/PBRT/PBRTDiffuseMaterial.slang";
     }
 
-    PBRTDiffuseMaterial::SharedPtr PBRTDiffuseMaterial::create(std::shared_ptr<Device> pDevice, const std::string& name)
-    {
-        return SharedPtr(new PBRTDiffuseMaterial(std::move(pDevice), name));
-    }
-
-    PBRTDiffuseMaterial::PBRTDiffuseMaterial(std::shared_ptr<Device> pDevice, const std::string& name)
-        : BasicMaterial(std::move(pDevice), name, MaterialType::PBRTDiffuse)
+    PBRTDiffuseMaterial::PBRTDiffuseMaterial(ref<Device> pDevice, const std::string& name)
+        : BasicMaterial(pDevice, name, MaterialType::PBRTDiffuse)
     {
         // Setup additional texture slots.
         mTextureSlotInfo[(uint32_t)TextureSlot::BaseColor] = { "baseColor", TextureChannelFlags::RGBA, true };
         mTextureSlotInfo[(uint32_t)TextureSlot::Normal] = { "normal", TextureChannelFlags::RGB, false };
     }
 
-    Program::ShaderModuleList PBRTDiffuseMaterial::getShaderModules() const
+    ProgramDesc::ShaderModuleList PBRTDiffuseMaterial::getShaderModules() const
     {
-        return { Program::ShaderModule(kShaderFile) };
+        return { ProgramDesc::ShaderModule::fromFile(kShaderFile) };
     }
 
-    Program::TypeConformanceList PBRTDiffuseMaterial::getTypeConformances() const
+    TypeConformanceList PBRTDiffuseMaterial::getTypeConformances() const
     {
         return { {{"PBRTDiffuseMaterial", "IMaterial"}, (uint32_t)MaterialType::PBRTDiffuse} };
+    }
+
+    const MaterialParamLayout& PBRTDiffuseMaterial::getParamLayout() const
+    {
+        return PBRTDiffuseMaterialParamLayout::layout();
+    }
+
+    SerializedMaterialParams PBRTDiffuseMaterial::serializeParams() const
+    {
+        return PBRTDiffuseMaterialParamLayout::serialize(this);
+    }
+
+    void PBRTDiffuseMaterial::deserializeParams(const SerializedMaterialParams& params)
+    {
+        PBRTDiffuseMaterialParamLayout::deserialize(this, params);
     }
 
     FALCOR_SCRIPT_BINDING(PBRTDiffuseMaterial)
@@ -65,11 +76,19 @@ namespace Falcor
 
         FALCOR_SCRIPT_BINDING_DEPENDENCY(BasicMaterial)
 
-        pybind11::class_<PBRTDiffuseMaterial, BasicMaterial, PBRTDiffuseMaterial::SharedPtr> material(m, "PBRTDiffuseMaterial");
+        pybind11::class_<PBRTDiffuseMaterial, BasicMaterial, ref<PBRTDiffuseMaterial>> material(m, "PBRTDiffuseMaterial");
         auto create = [] (const std::string& name)
         {
-            return PBRTDiffuseMaterial::create(getActivePythonSceneBuilder().getDevice(), name);
+            return PBRTDiffuseMaterial::create(accessActivePythonSceneBuilder().getDevice(), name);
         };
         material.def(pybind11::init(create), "name"_a = ""); // PYTHONDEPRECATED
+        material.def(pybind11::init(
+            [](ref<Device> device, const std::string& name)
+            {
+                return PBRTDiffuseMaterial::create(device, name);
+            }),
+            "device"_a,
+            "name"_a = ""
+        ); // PYTHONDEPRECATED
     }
 }

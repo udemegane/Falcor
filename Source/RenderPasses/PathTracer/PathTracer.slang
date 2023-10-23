@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -129,21 +129,21 @@ struct PathTracer
     {
         uint index;         ///< Vertex index (0 = camera, 1 = primary hit, 2 = secondary hit, etc.).
         float3 pos;         ///< Vertex position.
-        float3 normal;      ///< Shading normal at the vertex (zero if not on a surface).
         float3 faceNormal;  ///< Geometry normal at the vertex (zero if not on a surface).
+        bool frontFacing;   ///< True if path vertex is on the front-facing side (if on a surface).
 
         /** Initializes a path vertex.
             \param[in] index Vertex index.
             \param[in] pos Vertex position.
-            \param[in] normal Shading normal.
             \param[in] faceNormal Geometry normal.
+            \param[in] frontFacing Front-facing flag.
         */
-        __init(uint index, float3 pos, float3 normal = float3(0.f), float3 faceNormal = float3(0.f))
+        __init(uint index, float3 pos, float3 faceNormal = float3(0.f), bool frontFacing = true)
         {
             this.index = index;
             this.pos = pos;
-            this.normal = normal;
             this.faceNormal = faceNormal;
+            this.frontFacing = frontFacing;
         }
 
         /** Get position with offset applied in direction of the geometry normal to avoid self-intersection
@@ -154,6 +154,14 @@ struct PathTracer
         float3 getRayOrigin(float3 rayDir)
         {
             return computeRayOrigin(pos, dot(faceNormal, rayDir) >= 0 ? faceNormal : -faceNormal);
+        }
+
+        /** Returns the oriented face normal.
+            \return Face normal flipped to the same side as the view vector.
+        */
+        float3 getOrientedFaceNormal()
+        {
+            return frontFacing ? faceNormal : -faceNormal;
         }
     };
 
@@ -301,6 +309,55 @@ struct PathTracer
         logSetPixel(path.getPixel());
     }
 
+    /** Compute a set of coherence hints for a given path state.
+        These hints predict the code path taken in the next call to handleHit() with the given path state.
+        They are used by reordering schedulers to extract coherence.
+        \param[in] path Path state.
+        \param[in] isDeltaSpecular Hit material is pure delta specular.
+        \param[in] isEmissive Hit material is emissive.
+        \return Returns a bit mask of coherence hints. MSB is highest priority hint. Currently 4 bits are used.
+    */
+    uint getCoherenceHints(const PathState path, const bool isDeltaSpecular, const bool isEmissive)
+    {
+        bool terminatedByRussianRoulette = {}; ///< handleHit() will be terminated early due to russian roulette.
+        bool terminated = {};                  ///< handleHit() will be terminated early.
+        bool samplesLight = {};                ///< handleHit() will sample a light.
+        bool computesEmissive = {};            ///< handleHit() will compute emission.
+
+        // Determines if handleHit() will return early due to russian roulette.
+        if (kUseRussianRoulette)
+        {
+            // This is under the assumption that the first random number drawn from the sample generator is used for russian roulette.
+            // Keep in sync with handleHit().
+            PathState tmpPath = path;
+            terminatedByRussianRoulette = terminatePathByRussianRoulette(tmpPath, sampleNext1D(tmpPath.sg));
+        }
+
+        // Determines if handleHit() will return early.
+        terminated = hasFinishedSurfaceBounces(path);
+        if (kDisableCaustics && path.getBounces(BounceType::Diffuse) > 0 && isDeltaSpecular)
+            terminated = true;
+
+        // Determines if handleHit() will sample a light.
+        samplesLight = true;
+        if (isDeltaSpecular)
+            samplesLight = false;
+        if (!kUseLightsInDielectricVolumes && path.isInsideDielectricVolume())
+            samplesLight = false;
+
+        // Determines if handleHit() will compute emission.
+        computesEmissive = isEmissive && path.isLightSamplable();
+        if (kUseRTXDI && path.getVertexIndex() == 2 && !isDeltaSpecular)
+            computesEmissive = false;
+
+        // MSB = highest priority hint.
+        return
+            select(computesEmissive, 0x1, 0x0) |
+            select(samplesLight, 0x2, 0x0) |
+            select(terminated, 0x4, 0x0) |
+            select(terminatedByRussianRoulette, 0x8, 0x0);
+    }
+
     /** Update the path throughouput.
         \param[in,out] path Path state.
         \param[in] weight Vertex throughput.
@@ -429,12 +486,12 @@ struct PathTracer
             {
                 // For curves tessellated into poly-tubes, we make sure that the origin is on the same side as a scatter ray direction
                 // so there is no self-intersection.
-                path.origin = sd.posW - sd.N * sd.curveRadius * 2.1f;
+                path.origin = sd.posW - sd.frame.N * sd.curveRadius * 2.1f;
             }
             else
             {
                 // Compute ray origin for next ray segment.
-                path.origin = sd.computeNewRayOrigin(false);
+                path.origin = sd.computeRayOrigin(false);
 
                 // Update interior list and inside volume flag.
                 if (!sd.mtl.isThinSurface())
@@ -446,8 +503,8 @@ struct PathTracer
             }
         }
 
-        // Save the shading normal. This is needed for MIS.
-        path.normal = sd.N;
+        // Save the normal used for NEE. This is needed for MIS.
+        path.normal = sd.getOrientedFaceNormal();
 
         // Mark the path as valid only if it has a non-zero throughput.
         bool valid = any(path.thp > 0.f);
@@ -520,7 +577,7 @@ struct PathTracer
 
     /** Generates a light sample on the emissive geometry.
         \param[in] vertex Path vertex.
-        \param[in] upperHemisphere True if only upper hemisphere (w.r.t. shading normal) should be considered.
+        \param[in] upperHemisphere True if only upper hemisphere should be considered.
         \param[in,out] sg Sample generator.
         \param[out] ls Struct describing valid samples.
         \return True if the sample is valid and has nonzero contribution, false otherwise.
@@ -531,7 +588,7 @@ struct PathTracer
         if (!kUseEmissiveLights) return false;
 
         TriangleLightSample tls;
-        if (!emissiveSampler.sampleLight(vertex.pos, vertex.normal, upperHemisphere, sg, tls)) return false;
+        if (!emissiveSampler.sampleLight(vertex.pos, vertex.getOrientedFaceNormal(), upperHemisphere, sg, tls)) return false;
 
         // Setup returned sample.
         ls.Li = tls.pdf > 0.f ? tls.Le / tls.pdf : float3(0);
@@ -629,13 +686,15 @@ struct PathTracer
             u -= p[lightType];
         }
 
+        lightType = {};
+        pdf = {};
+
         return false;
     }
 
     /** Samples a light source in the scene.
         This function first stochastically selects a type of light source to sample,
         and then calls that the sampling function for the chosen light type.
-        The upper/lower hemisphere is defined as the union of the hemispheres w.r.t. to the shading and face normals.
         \param[in] vertex Path vertex.
         \param[in] sampleUpperHemisphere True if the upper hemisphere should be sampled.
         \param[in] sampleLowerHemisphere True if the lower hemisphere should be sampled.
@@ -666,12 +725,9 @@ struct PathTracer
         if (!valid) return false;
 
         // Reject samples in non-requested hemispheres.
-        float cosTheta = dot(vertex.normal, ls.dir);
-        // Flip the face normal to point in the same hemisphere as the shading normal.
-        float3 faceNormal = sign(dot(vertex.normal, vertex.faceNormal)) * vertex.faceNormal;
-        float cosThetaFace = dot(faceNormal, ls.dir);
-        if (!sampleUpperHemisphere && (max(cosTheta, cosThetaFace) >= -kMinCosTheta)) return false;
-        if (!sampleLowerHemisphere && (min(cosTheta, cosThetaFace) <= kMinCosTheta)) return false;
+        float NdotL = dot(vertex.getOrientedFaceNormal(), ls.dir);
+        if ((!sampleUpperHemisphere && NdotL >= -kMinCosTheta) || (!sampleLowerHemisphere && NdotL <= kMinCosTheta))
+            return false;
 
         // Account for light type selection.
         ls.lightType = lightType;
@@ -700,7 +756,7 @@ struct PathTracer
             {
                 path.rejectedHits++;
                 path.interiorList.handleIntersection(sd.materialID, nestedPriority, sd.frontFacing);
-                path.origin = sd.computeNewRayOrigin(false);
+                path.origin = sd.computeRayOrigin(false);
                 path.decrementVertexIndex();
             }
             else
@@ -778,7 +834,7 @@ struct PathTracer
         let lod = createTextureSampler(path, isPrimaryHit, isTriangleHit);
 
         // Load shading data. This is a long latency operation.
-        ShadingData sd = loadShadingData(path.hit, path.origin, path.dir, isPrimaryHit, lod);
+        ShadingData sd = loadShadingData(path.hit, path.origin, path.dir, lod);
 
         const bool isHairMaterial = kUseHairMaterial && (sd.mtl.getMaterialType() == MaterialType::Hair);
         // TODO: Decouple geometry from the material.
@@ -799,7 +855,8 @@ struct PathTracer
         logPathVertex();
 
         // Create BSDF instance and query its properties.
-        const IMaterialInstance mi = gScene.materials.getMaterialInstance(sd, lod);
+        let hints = getMaterialInstanceHints(path.hit, isPrimaryHit);
+        const IMaterialInstance mi = gScene.materials.getMaterialInstance(sd, lod, hints);
         BSDFProperties bsdfProperties = mi.getProperties(sd);
 
         // Disable specular lobes if caustics are disabled and path already contains a diffuse vertex.
@@ -843,7 +900,7 @@ struct PathTracer
                 TriangleLightHit hit;
                 hit.triangleIndex = gScene.lightCollection.getTriangleIndex(triangleHit.instanceID, triangleHit.primitiveIndex);
                 hit.posW = sd.posW;
-                hit.normalW = sd.frontFacing ? sd.faceN : -sd.faceN;
+                hit.normalW = sd.getOrientedFaceNormal();
 
                 // Evaluate PDF at the hit, had it been generated with light sampling.
                 // Emissive light samplers have an option to exclusively sample the upper hemisphere.
@@ -872,16 +929,16 @@ struct PathTracer
         if (isCurveHit)
         {
             // For curves, we set the new origin at the sphere center.
-            path.origin = sd.posW - sd.N * sd.curveRadius;
+            path.origin = sd.posW - sd.frame.N * sd.curveRadius;
         }
         else if (isCurvePolyTubeHit)
         {
             // For curves tessellated into poly-tubes, we offset the new origin away from the curve center.
-            path.origin = sd.posW + sd.N * sd.curveRadius * 0.1f;
+            path.origin = sd.posW + sd.frame.N * sd.curveRadius * 0.1f;
         }
         else
         {
-            path.origin = sd.computeNewRayOrigin();
+            path.origin = sd.computeRayOrigin();
         }
 
         // Determine if BSDF has non-delta lobes.
@@ -910,7 +967,7 @@ struct PathTracer
             else
             {
                 // Setup path vertex.
-                PathVertex vertex = PathVertex(path.getVertexIndex(), sd.posW, sd.N, sd.faceN);
+                PathVertex vertex = PathVertex(path.getVertexIndex(), sd.posW, sd.faceN, sd.frontFacing);
 
                 // Determine if upper/lower hemispheres need to be sampled.
                 bool sampleUpperHemisphere = isCurveHit || isCurvePolyTubeHit || ((lobeTypes & (uint)LobeType::NonDeltaReflection) != 0);
@@ -941,9 +998,9 @@ struct PathTracer
                     {
                         // For curves tessellated into poly-tubes, we make sure that the origin is on the same side as light
                         // so there is no self-shadowing (transmission lobe of hair BSDF takes care of that).
-                        if (dot(sd.N, ray.dir) < 0.f)
+                        if (dot(sd.frame.N, ray.dir) < 0.f)
                         {
-                            ray.origin = ray.origin - sd.N * sd.curveRadius * 2.1f;
+                            ray.origin = ray.origin - sd.frame.N * sd.curveRadius * 2.1f;
                         }
                     }
 

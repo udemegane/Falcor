@@ -25,20 +25,13 @@
  # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
-#include "Utils/Math/MathConstants.slangh"
-
 __exported import Rendering.Materials.IMaterialInstance;
-__exported import Rendering.Materials.BxDF;
 __exported import Rendering.Materials.AnisotropicGGX;
-import Utils.Color.ColorHelpers;
-import Utils.Math.MathHelpers;
-import Rendering.Materials.Fresnel;
 import Rendering.Materials.LayeredBSDF;
 import Rendering.Materials.PBRT.PBRTConductorMaterialInstance;
 import Rendering.Materials.PBRT.PBRTDielectricMaterialInstance;
-import Utils.Sampling.UniformSampleGenerator;
 
-struct PBRTCoatedConductorMaterialInstance : IMaterialInstance
+struct PBRTCoatedConductorMaterialInstance : MaterialInstanceBase, IMaterialInstance
 {
     ShadingFrame sf;            ///< Shading frame in world space.
     AnisotropicGGX interfaceD;
@@ -52,32 +45,48 @@ struct PBRTCoatedConductorMaterialInstance : IMaterialInstance
     {
         float3 wiLocal = sf.toLocal(sd.V);
         float3 woLocal = sf.toLocal(wo);
-        
+
+        if (!isValidHemisphereReflection(sd, sf, wiLocal, woLocal, wo)) return float3(0.f);
+
         PBRTDielectricBSDF top = {interfaceD, interfaceEta};
         PBRTConductorBSDF bottom = {conductorD, conductorEta, conductorK};
 
         return LayeredBSDF(top, bottom).eval(wiLocal, woLocal, sg);
     }
 
+    [Differentiable]
+    float3 evalAD<S : ISampleGenerator>(const DiffMaterialData diffData, const ShadingData sd, const float3 wo, inout S sg)
+    {
+        return float3(0.f);
+    }
+
     bool sample<S : ISampleGenerator>(const ShadingData sd, inout S sg, out BSDFSample result, bool useImportanceSampling = true)
     {
         float3 wiLocal = sf.toLocal(sd.V);
-        
+        float3 woLocal = {};
+
         PBRTDielectricBSDF top = {interfaceD, interfaceEta};
         PBRTConductorBSDF bottom = {conductorD, conductorEta, conductorK};
 
-        bool valid = LayeredBSDF(top, bottom).sample(wiLocal, result.wo, result.pdf, result.weight, result.lobeType, sg);
+        bool valid = LayeredBSDF(top, bottom).sample(wiLocal, woLocal, result.pdf, result.weight, result.lobeType, sg);
+        result.wo = sf.fromLocal(woLocal);
 
-        result.wo = sf.fromLocal(result.wo);
+        if (!isValidHemisphereReflection(sd, sf, wiLocal, woLocal, result.wo) || result.pdf == 0.f) return false;
+
         return valid;
     }
 
     float evalPdf(const ShadingData sd, const float3 wo, bool useImportanceSampling = true)
     {
+        float3 wiLocal = sf.toLocal(sd.V);
+        float3 woLocal = sf.toLocal(wo);
+
+        if (!isValidHemisphereReflection(sd, sf, wiLocal, woLocal, wo)) return 0.f;
+
         PBRTDielectricBSDF top = {interfaceD, interfaceEta};
         PBRTConductorBSDF bottom = {conductorD, conductorEta, conductorK};
-        
-        return LayeredBSDF(top, bottom).evalPdf(sf.toLocal(sd.V), sf.toLocal(wo));
+
+        return LayeredBSDF(top, bottom).evalPdf(wiLocal, woLocal);
     }
 
     BSDFProperties getProperties(const ShadingData sd)

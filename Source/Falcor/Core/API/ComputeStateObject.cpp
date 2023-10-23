@@ -36,37 +36,27 @@
 
 namespace Falcor
 {
-bool ComputeStateObject::Desc::operator==(const ComputeStateObject::Desc& other) const
-{
-    bool b = true;
-    b = b && (mpProgram == other.mpProgram);
-    return b;
-}
 
-ComputeStateObject::~ComputeStateObject()
-{
-    mpDevice->releaseResource(mGfxPipelineState);
-}
-
-ComputeStateObject::ComputeStateObject(std::shared_ptr<Device> pDevice, const Desc& desc) : mpDevice(std::move(pDevice)), mDesc(desc)
+ComputeStateObject::ComputeStateObject(ref<Device> pDevice, ComputeStateObjectDesc desc)
+    : mpDevice(std::move(pDevice)), mDesc(std::move(desc))
 {
     gfx::ComputePipelineStateDesc computePipelineDesc = {};
-    computePipelineDesc.program = mDesc.mpProgram->getGfxProgram();
+    computePipelineDesc.program = mDesc.pProgramKernels->getGfxProgram();
 #if FALCOR_HAS_D3D12
-    if (mDesc.mpD3D12RootSignatureOverride)
+    if (mDesc.pD3D12RootSignatureOverride)
         mpDevice->requireD3D12();
     if (mpDevice->getType() == Device::Type::D3D12)
     {
         computePipelineDesc.d3d12RootSignatureOverride =
-            mDesc.mpD3D12RootSignatureOverride ? (void*)mDesc.mpD3D12RootSignatureOverride->getApiHandle().GetInterfacePtr() : nullptr;
+            mDesc.pD3D12RootSignatureOverride ? (void*)mDesc.pD3D12RootSignatureOverride->getApiHandle().GetInterfacePtr() : nullptr;
     }
 #endif
     FALCOR_GFX_CALL(mpDevice->getGfxDevice()->createComputePipelineState(computePipelineDesc, mGfxPipelineState.writeRef()));
 }
 
-ComputeStateObject::SharedPtr ComputeStateObject::create(Device* pDevice, const Desc& desc)
+ComputeStateObject::~ComputeStateObject()
 {
-    return SharedPtr(new ComputeStateObject(pDevice->shared_from_this(), desc));
+    mpDevice->releaseResource(mGfxPipelineState);
 }
 
 NativeHandle ComputeStateObject::getNativeHandle() const

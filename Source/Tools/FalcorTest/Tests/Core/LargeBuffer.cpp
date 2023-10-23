@@ -38,7 +38,7 @@ std::mt19937 r;
  */
 void testCopyRegion(GPUUnitTestContext& ctx, size_t bufferSize)
 {
-    Device* pDevice = ctx.getDevice().get();
+    ref<Device> pDevice = ctx.getDevice();
 
     std::vector<uint32_t> data(256);
     const size_t testSize = data.size() * sizeof(data[0]);
@@ -46,39 +46,39 @@ void testCopyRegion(GPUUnitTestContext& ctx, size_t bufferSize)
     // Initialize small buffers with known data.
     for (size_t i = 0; i < data.size(); i++)
         data[i] = 0xcdcdcdcd;
-    auto pDefaultData = Buffer::create(pDevice, testSize, ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, data.data());
+    auto pDefaultData = pDevice->createBuffer(testSize, ResourceBindFlags::ShaderResource, MemoryType::DeviceLocal, data.data());
     for (size_t i = 0; i < data.size(); i++)
         data[i] = r();
-    auto pTestData = Buffer::create(pDevice, testSize, ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, data.data());
-    auto pReadback = Buffer::create(pDevice, testSize, ResourceBindFlags::None, Buffer::CpuAccess::Read, nullptr);
+    auto pTestData = pDevice->createBuffer(testSize, ResourceBindFlags::ShaderResource, MemoryType::DeviceLocal, data.data());
+    auto pReadback = pDevice->createBuffer(testSize, ResourceBindFlags::None, MemoryType::ReadBack, nullptr);
 
     // Create large buffer.
-    auto pBuffer = Buffer::create(pDevice, bufferSize, ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, nullptr);
+    auto pBuffer = pDevice->createBuffer(bufferSize, ResourceBindFlags::ShaderResource, MemoryType::DeviceLocal, nullptr);
     EXPECT(pBuffer);
     EXPECT_EQ(bufferSize, pBuffer->getSize());
 
     // Default initialize the end of the large buffer.
     const uint64_t dstOffset = pBuffer->getSize() - testSize;
     ctx.getRenderContext()->copyBufferRegion(pBuffer.get(), dstOffset, pDefaultData.get(), 0ull, testSize);
-    ctx.getRenderContext()->flush(true); // For safety's sake
+    ctx.getRenderContext()->submit(true); // For safety's sake
 
     // Copy the test data into the end of the large buffer.
     ctx.getRenderContext()->copyBufferRegion(pBuffer.get(), dstOffset, pTestData.get(), 0ull, testSize);
-    ctx.getRenderContext()->flush(true); // For safety's sake
+    ctx.getRenderContext()->submit(true); // For safety's sake
 
     // For >4GB buffers, also default initialize at the destination offset cast to 32-bit *after* the copy above.
     // This is to make sure that copyBufferRegion() aren't actually truncating the offset internally.
     if (dstOffset + testSize > (1ull << 32))
     {
         ctx.getRenderContext()->copyBufferRegion(pBuffer.get(), (uint32_t)dstOffset, pDefaultData.get(), 0ull, testSize);
-        ctx.getRenderContext()->flush(true); // For safety's sake
+        ctx.getRenderContext()->submit(true); // For safety's sake
     }
 
     // Copy the end of the large buffer into a readback buffer.
     ctx.getRenderContext()->copyBufferRegion(pReadback.get(), 0ull, pBuffer.get(), dstOffset, testSize);
 
     // Flush and wait for the result.
-    ctx.getRenderContext()->flush(true);
+    ctx.getRenderContext()->submit(true);
 
     // Check the result.
     const uint32_t* result = static_cast<const uint32_t*>(pReadback->map(Buffer::MapType::Read));
@@ -93,9 +93,9 @@ void testCopyRegion(GPUUnitTestContext& ctx, size_t bufferSize)
  */
 void testReadRaw(GPUUnitTestContext& ctx, bool useRootDesc, size_t bufferSize)
 {
-    Device* pDevice = ctx.getDevice().get();
+    ref<Device> pDevice = ctx.getDevice();
 
-    Shader::DefineList defines;
+    DefineList defines;
     defines.add("USE_ROOT_DESC", useRootDesc ? "1" : "0");
 
     size_t elemCount = bufferSize / sizeof(uint32_t);
@@ -106,29 +106,29 @@ void testReadRaw(GPUUnitTestContext& ctx, bool useRootDesc, size_t bufferSize)
     const size_t testSize = data.size() * sizeof(data[0]);
     for (size_t i = 0; i < data.size(); i++)
         data[i] = 0xcdcdcdcd;
-    auto pDefaultData = Buffer::create(pDevice, testSize, ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, data.data());
+    auto pDefaultData = pDevice->createBuffer(testSize, ResourceBindFlags::ShaderResource, MemoryType::DeviceLocal, data.data());
     for (size_t i = 0; i < data.size(); i++)
         data[i] = r();
-    auto pTestData = Buffer::create(pDevice, testSize, ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, data.data());
+    auto pTestData = pDevice->createBuffer(testSize, ResourceBindFlags::ShaderResource, MemoryType::DeviceLocal, data.data());
 
     // Create large buffer.
-    auto pBuffer = Buffer::create(pDevice, bufferSize, ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, nullptr);
+    auto pBuffer = pDevice->createBuffer(bufferSize, ResourceBindFlags::ShaderResource, MemoryType::DeviceLocal, nullptr);
     EXPECT(pBuffer);
 
     // Copy the test data into the end of the large buffer.
     const uint64_t dstOffset = pBuffer->getSize() - testSize;
     ctx.getRenderContext()->copyBufferRegion(pBuffer.get(), dstOffset, pTestData.get(), 0ull, testSize);
-    ctx.getRenderContext()->flush(true); // For safety's sake
+    ctx.getRenderContext()->submit(true); // For safety's sake
 
     // For >4GB buffers, also default initialize at the destination offset cast to 32-bit *after* the copy above.
     if (dstOffset + testSize > (1ull << 32))
     {
         ctx.getRenderContext()->copyBufferRegion(pBuffer.get(), (uint32_t)dstOffset, pDefaultData.get(), 0ull, testSize);
-        ctx.getRenderContext()->flush(true); // For safety's sake
+        ctx.getRenderContext()->submit(true); // For safety's sake
     }
 
     // Run compute program to read from the large buffer.
-    ctx.createProgram("Tests/Core/LargeBuffer.cs.slang", "testReadRaw", defines, Shader::CompilerFlags::None);
+    ctx.createProgram("Tests/Core/LargeBuffer.cs.slang", "testReadRaw", defines);
     ctx.allocateStructuredBuffer("result", 256);
     auto var = ctx.vars().getRootVar();
     var["buffer"] = pBuffer;
@@ -136,21 +136,20 @@ void testReadRaw(GPUUnitTestContext& ctx, bool useRootDesc, size_t bufferSize)
     ctx.runProgram(256, 1, 1);
 
     // Check the result.
-    const uint32_t* result = ctx.mapBuffer<const uint32_t>("result");
+    std::vector<uint32_t> result = ctx.readBuffer<uint32_t>("result");
     for (size_t i = 0; i < data.size(); i++)
     {
         EXPECT_EQ(result[i], data[i]) << "i = " << i;
     }
-    ctx.unmapBuffer("result");
 }
 
 /** Test reading from the end of a large structured buffer (stride 16B).
  */
 void testReadStructured(GPUUnitTestContext& ctx, bool useRootDesc, size_t bufferSize)
 {
-    Device* pDevice = ctx.getDevice().get();
+    ref<Device> pDevice = ctx.getDevice();
 
-    Shader::DefineList defines;
+    DefineList defines;
     defines.add("USE_ROOT_DESC", useRootDesc ? "1" : "0");
 
     size_t elemCount = bufferSize / sizeof(uint4);
@@ -161,31 +160,31 @@ void testReadStructured(GPUUnitTestContext& ctx, bool useRootDesc, size_t buffer
     const size_t testSize = data.size() * sizeof(data[0]);
     for (size_t i = 0; i < data.size(); i++)
         data[i] = uint4(0xcdcdcdcd);
-    auto pDefaultData = Buffer::create(pDevice, testSize, ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, data.data());
+    auto pDefaultData = pDevice->createBuffer(testSize, ResourceBindFlags::ShaderResource, MemoryType::DeviceLocal, data.data());
     for (size_t i = 0; i < data.size(); i++)
         data[i] = uint4(r());
-    auto pTestData = Buffer::create(pDevice, testSize, ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, data.data());
+    auto pTestData = pDevice->createBuffer(testSize, ResourceBindFlags::ShaderResource, MemoryType::DeviceLocal, data.data());
 
     // Create large buffer.
-    auto pBuffer = Buffer::createStructured(
-        pDevice, sizeof(uint4), (uint32_t)elemCount, ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, nullptr, false
+    auto pBuffer = pDevice->createStructuredBuffer(
+        sizeof(uint4), (uint32_t)elemCount, ResourceBindFlags::ShaderResource, MemoryType::DeviceLocal, nullptr, false
     );
     EXPECT(pBuffer);
 
     // Copy the test data into the end of the large buffer.
     const uint64_t dstOffset = pBuffer->getSize() - testSize;
     ctx.getRenderContext()->copyBufferRegion(pBuffer.get(), dstOffset, pTestData.get(), 0ull, testSize);
-    ctx.getRenderContext()->flush(true); // For safety's sake
+    ctx.getRenderContext()->submit(true); // For safety's sake
 
     // For >4GB buffers, also default initialize at the destination offset cast to 32-bit *after* the copy above.
     if (dstOffset + testSize > (1ull << 32))
     {
         ctx.getRenderContext()->copyBufferRegion(pBuffer.get(), (uint32_t)dstOffset, pDefaultData.get(), 0ull, testSize);
-        ctx.getRenderContext()->flush(true); // For safety's sake
+        ctx.getRenderContext()->submit(true); // For safety's sake
     }
 
     // Run compute program to read from the large buffer.
-    ctx.createProgram("Tests/Core/LargeBuffer.cs.slang", "testReadStructured", defines, Shader::CompilerFlags::None);
+    ctx.createProgram("Tests/Core/LargeBuffer.cs.slang", "testReadStructured", defines);
     ctx.allocateStructuredBuffer("result", 256);
     auto var = ctx.vars().getRootVar();
     var["structuredBuffer"] = pBuffer;
@@ -193,21 +192,20 @@ void testReadStructured(GPUUnitTestContext& ctx, bool useRootDesc, size_t buffer
     ctx.runProgram(256, 1, 1);
 
     // Check the result.
-    const uint32_t* result = ctx.mapBuffer<const uint32_t>("result");
+    std::vector<uint32_t> result = ctx.readBuffer<uint32_t>("result");
     for (size_t i = 0; i < data.size(); i++)
     {
         EXPECT_EQ(result[i], data[i].x) << "i = " << i;
     }
-    ctx.unmapBuffer("result");
 }
 
 /** Test reading from the end of a large structured buffer (stride 4B).
  */
 void testReadStructuredUint(GPUUnitTestContext& ctx, bool useRootDesc, size_t bufferSize)
 {
-    Device* pDevice = ctx.getDevice().get();
+    ref<Device> pDevice = ctx.getDevice();
 
-    Shader::DefineList defines;
+    DefineList defines;
     defines.add("USE_ROOT_DESC", useRootDesc ? "1" : "0");
 
     size_t elemCount = bufferSize / sizeof(uint32_t);
@@ -218,31 +216,31 @@ void testReadStructuredUint(GPUUnitTestContext& ctx, bool useRootDesc, size_t bu
     const size_t testSize = data.size() * sizeof(data[0]);
     for (size_t i = 0; i < data.size(); i++)
         data[i] = 0xcdcdcdcd;
-    auto pDefaultData = Buffer::create(pDevice, testSize, ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, data.data());
+    auto pDefaultData = pDevice->createBuffer(testSize, ResourceBindFlags::ShaderResource, MemoryType::DeviceLocal, data.data());
     for (size_t i = 0; i < data.size(); i++)
         data[i] = r();
-    auto pTestData = Buffer::create(pDevice, testSize, ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, data.data());
+    auto pTestData = pDevice->createBuffer(testSize, ResourceBindFlags::ShaderResource, MemoryType::DeviceLocal, data.data());
 
     // Create large buffer.
-    auto pBuffer = Buffer::createStructured(
-        pDevice, sizeof(uint32_t), (uint32_t)elemCount, ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, nullptr, false
+    auto pBuffer = pDevice->createStructuredBuffer(
+        sizeof(uint32_t), (uint32_t)elemCount, ResourceBindFlags::ShaderResource, MemoryType::DeviceLocal, nullptr, false
     );
     EXPECT(pBuffer);
 
     // Copy the test data into the end of the large buffer.
     const uint64_t dstOffset = pBuffer->getSize() - testSize;
     ctx.getRenderContext()->copyBufferRegion(pBuffer.get(), dstOffset, pTestData.get(), 0ull, testSize);
-    ctx.getRenderContext()->flush(true); // For safety's sake
+    ctx.getRenderContext()->submit(true); // For safety's sake
 
     // For >4GB buffers, also default initialize at the destination offset cast to 32-bit *after* the copy above.
     if (dstOffset + testSize > (1ull << 32))
     {
         ctx.getRenderContext()->copyBufferRegion(pBuffer.get(), (uint32_t)dstOffset, pDefaultData.get(), 0ull, testSize);
-        ctx.getRenderContext()->flush(true); // For safety's sake
+        ctx.getRenderContext()->submit(true); // For safety's sake
     }
 
     // Run compute program to read from the large buffer.
-    ctx.createProgram("Tests/Core/LargeBuffer.cs.slang", "testReadStructuredUint", defines, Shader::CompilerFlags::None);
+    ctx.createProgram("Tests/Core/LargeBuffer.cs.slang", "testReadStructuredUint", defines);
     ctx.allocateStructuredBuffer("result", 256);
     auto var = ctx.vars().getRootVar();
     var["structuredBufferUint"] = pBuffer;
@@ -250,12 +248,11 @@ void testReadStructuredUint(GPUUnitTestContext& ctx, bool useRootDesc, size_t bu
     ctx.runProgram(256, 1, 1);
 
     // Check the result.
-    const uint32_t* result = ctx.mapBuffer<const uint32_t>("result");
+    std::vector<uint32_t> result = ctx.readBuffer<uint32_t>("result");
     for (size_t i = 0; i < data.size(); i++)
     {
         EXPECT_EQ(result[i], data[i]) << "i = " << i;
     }
-    ctx.unmapBuffer("result");
 }
 } // namespace
 
@@ -291,13 +288,13 @@ GPU_TEST(LargeBufferReadRawRoot1)
 }
 
 // Enabled for D3D12 only since Vulkan doesn't support buffers larger than 2^32-1.
-GPU_TEST_D3D12(LargeBufferReadRawRoot2)
+GPU_TEST(LargeBufferReadRawRoot2, Device::Type::D3D12)
 {
     testReadRaw(ctx, true, 4ull << 30); // 4GB
 }
 
 // Enabled for D3D12 only since Vulkan doesn't support buffers larger than 2^32-1.
-GPU_TEST_D3D12(LargeBufferReadRawRoot3, "Disabled due to 4GB buffer limit")
+GPU_TEST(LargeBufferReadRawRoot3, Device::Type::D3D12, "Disabled due to 4GB buffer limit")
 {
     testReadRaw(ctx, true, 5ull << 30); // 5GB
 }
@@ -314,13 +311,13 @@ GPU_TEST(LargeBufferReadStructuredRoot1)
 }
 
 // Enabled for D3D12 only since Vulkan doesn't support buffers larger than 2^32-1.
-GPU_TEST_D3D12(LargeBufferReadStructuredRoot2)
+GPU_TEST(LargeBufferReadStructuredRoot2, Device::Type::D3D12)
 {
     testReadStructured(ctx, true, 4ull << 30); // 4GB
 }
 
 // Enabled for D3D12 only since Vulkan doesn't support buffers larger than 2^32-1.
-GPU_TEST_D3D12(LargeBufferReadStructuredRoot3, "Disabled due to 4GB buffer limit")
+GPU_TEST(LargeBufferReadStructuredRoot3, Device::Type::D3D12, "Disabled due to 4GB buffer limit")
 {
     testReadStructured(ctx, true, 5ull << 30); // 5GB
 }

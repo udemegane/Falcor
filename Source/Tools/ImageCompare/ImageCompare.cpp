@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -61,16 +61,16 @@ T clamp(T x, T lo, T hi)
 class Image
 {
 public:
-    using SharedPtr = std::shared_ptr<Image>;
+    Image(uint32_t width, uint32_t height) : mWidth(width), mHeight(height), mData(std::make_unique<float[]>(width * height * 4)) {}
 
     uint32_t getWidth() const { return mWidth; }
     uint32_t getHeight() const { return mHeight; }
     const float* getData() const { return mData.get(); }
     float* getData() { return mData.get(); }
 
-    static SharedPtr create(uint32_t width, uint32_t height) { return SharedPtr(new Image(width, height)); }
+    static std::shared_ptr<Image> create(uint32_t width, uint32_t height) { return std::make_shared<Image>(width, height); }
 
-    static SharedPtr loadFromFile(const std::filesystem::path& path)
+    static std::shared_ptr<Image> loadFromFile(const std::filesystem::path& path)
     {
         FREE_IMAGE_FORMAT fifFormat = FIF_UNKNOWN;
 
@@ -100,8 +100,14 @@ public:
         auto image = create(FreeImage_GetWidth(floatBitmap), FreeImage_GetHeight(floatBitmap));
         int bytesPerPixel = 4 * sizeof(float);
         FreeImage_ConvertToRawBits(
-            reinterpret_cast<BYTE*>(image->getData()), floatBitmap, bytesPerPixel * image->getWidth(), bytesPerPixel * 8, FI_RGBA_RED_MASK,
-            FI_RGBA_GREEN_MASK, FI_RGBA_BLUE_MASK, true
+            reinterpret_cast<BYTE*>(image->getData()),
+            floatBitmap,
+            bytesPerPixel * image->getWidth(),
+            bytesPerPixel * 8,
+            FI_RGBA_RED_MASK,
+            FI_RGBA_GREEN_MASK,
+            FI_RGBA_BLUE_MASK,
+            true
         );
         FreeImage_Unload(floatBitmap);
 
@@ -180,8 +186,6 @@ private:
     uint32_t mWidth;
     uint32_t mHeight;
     std::unique_ptr<float[]> mData;
-
-    Image(uint32_t width, uint32_t height) : mWidth(width), mHeight(height), mData(std::make_unique<float[]>(width * height * 4)) {}
 };
 
 struct MSE
@@ -262,7 +266,7 @@ static const std::vector<ErrorMetric> errorMetrics = {
     {"mape", "Mean Absolute Percentage Error", compare<MAPE>},
 };
 
-static Image::SharedPtr generateHeatMap(uint32_t width, uint32_t height, const float* errorMap)
+static std::shared_ptr<Image> generateHeatMap(uint32_t width, uint32_t height, const float* errorMap)
 {
     auto writeColor = [](float t, float* dst)
     {
@@ -312,7 +316,7 @@ static bool compareImages(
         catch (const std::runtime_error& e)
         {
             std::cerr << "Cannot load image from '" << path.string() << "' (Error: " << e.what() << ")." << std::endl;
-            return Image::SharedPtr();
+            return std::shared_ptr<Image>{};
         }
     };
 
@@ -438,8 +442,12 @@ int main(int argc, char** argv)
     }
 
     bool success = compareImages(
-        args::get(image1), args::get(image2), metric, thresholdFlag ? args::get(thresholdFlag) : 0.f,
-        alphaFlag ? args::get(alphaFlag) : false, heatMapFlag ? args::get(heatMapFlag) : ""
+        args::get(image1),
+        args::get(image2),
+        metric,
+        thresholdFlag ? args::get(thresholdFlag) : 0.f,
+        alphaFlag ? args::get(alphaFlag) : false,
+        heatMapFlag ? args::get(heatMapFlag) : ""
     );
     return success ? 0 : 1;
 }

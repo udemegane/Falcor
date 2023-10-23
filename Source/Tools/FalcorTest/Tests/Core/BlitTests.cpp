@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -26,6 +26,8 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #include "Testing/UnitTest.h"
+
+#include <random>
 
 namespace Falcor
 {
@@ -90,21 +92,22 @@ void testBlit(GPUUnitTestContext& ctx, const uint2 srcDim, const uint32_t scale)
 
     // Create textures and perform blit.
     ResourceFormat format = std::is_same_v<T, float> ? ResourceFormat::RGBA32Float : ResourceFormat::RGBA32Uint;
-    auto pSrc = Texture::create2D(srcDim.x, srcDim.y, format, 1, 1, srcData.data(), ResourceBindFlags::ShaderResource);
-    auto pDst =
-        Texture::create2D(dstDim.x, dstDim.y, format, 1, 1, nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::RenderTarget);
+    auto pSrc = ctx.getDevice()->createTexture2D(srcDim.x, srcDim.y, format, 1, 1, srcData.data(), ResourceBindFlags::ShaderResource);
+    auto pDst = ctx.getDevice()->createTexture2D(
+        dstDim.x, dstDim.y, format, 1, 1, nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::RenderTarget
+    );
 
     ctx.getRenderContext()->blit(pSrc->getSRV(), pDst->getRTV());
 
     // Run program to copy resulting texels into readback buffer.
-    Program::DefineList defines = {{"FLOAT_FORMAT", std::is_same_v<T, float> ? "1" : "0"}};
-    ctx.createProgram("Tests/Core/BlitTests.cs.slang", "readback", defines, Shader::CompilerFlags::None);
+    DefineList defines = {{"FLOAT_FORMAT", std::is_same_v<T, float> ? "1" : "0"}};
+    ctx.createProgram("Tests/Core/BlitTests.cs.slang", "readback", defines);
     ctx.allocateStructuredBuffer("result", dstElemes);
     ctx["tex"] = pDst;
     ctx["CB"]["sz"] = dstDim;
     ctx.runProgram(dstDim.x, dstDim.y, 1);
 
-    const T* result = ctx.mapBuffer<const T>("result");
+    std::vector<T> result = ctx.readBuffer<T>("result");
     for (uint32_t i = 0; i < dstElemes; i++)
     {
         if constexpr (std::is_same_v<T, float>)
@@ -116,7 +119,6 @@ void testBlit(GPUUnitTestContext& ctx, const uint2 srcDim, const uint32_t scale)
             EXPECT_EQ(result[i], dstData[i]) << "i = " << i;
         }
     }
-    ctx.unmapBuffer("result");
 }
 } // namespace
 

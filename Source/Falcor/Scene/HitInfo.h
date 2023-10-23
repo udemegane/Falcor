@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -28,7 +28,7 @@
 #pragma once
 #include "Core/Macros.h"
 #include "Core/API/Formats.h"
-#include "Core/API/Shader.h"
+#include "Core/Program/DefineList.h"
 
 namespace Falcor
 {
@@ -47,8 +47,8 @@ namespace Falcor
     class FALCOR_API HitInfo
     {
     public:
-        static const uint32_t kMaxPackedSizeInBytes = 16;
-        static const ResourceFormat kDefaultFormat = ResourceFormat::RGBA32Uint;
+        static constexpr uint32_t kMaxPackedSizeInBytes = 16;
+        static constexpr ResourceFormat kDefaultFormat = ResourceFormat::RGBA32Uint;
 
         HitInfo() = default;
         HitInfo(const Scene& scene, bool useCompression = false) { init(scene, useCompression); }
@@ -56,7 +56,7 @@ namespace Falcor
 
         /** Returns defines needed packing/unpacking a HitInfo struct.
         */
-        Shader::DefineList getDefines() const;
+        DefineList getDefines() const;
 
         /** Returns the resource format required for encoding packed hit information.
         */

@@ -28,22 +28,20 @@
 #pragma once
 #include "Handles.h"
 #include "Core/Macros.h"
+#include "Core/Object.h"
 #include "Core/API/VertexLayout.h"
 #include "Core/API/FBO.h"
 #include "Core/API/RasterizerState.h"
 #include "Core/API/DepthStencilState.h"
 #include "Core/API/BlendState.h"
 #include "Core/Program/ProgramVersion.h"
-#include <memory>
 
 namespace Falcor
 {
-class FALCOR_API GraphicsStateObject
-{
-public:
-    using SharedPtr = std::shared_ptr<GraphicsStateObject>;
 
-    static const uint32_t kSampleMaskAll = -1;
+struct GraphicsStateObjectDesc
+{
+    static constexpr uint32_t kSampleMaskAll = -1;
 
     /**
      * Primitive topology
@@ -57,101 +55,48 @@ public:
         Patch,
     };
 
-    class FALCOR_API Desc
+    Fbo::Desc fboDesc;
+    ref<const VertexLayout> pVertexLayout;
+    ref<const ProgramKernels> pProgramKernels;
+    ref<RasterizerState> pRasterizerState;
+    ref<DepthStencilState> pDepthStencilState;
+    ref<BlendState> pBlendState;
+    uint32_t sampleMask = kSampleMaskAll;
+    PrimitiveType primitiveType = PrimitiveType::Undefined;
+
+    bool operator==(const GraphicsStateObjectDesc& other) const
     {
-    public:
-        Desc& setVertexLayout(VertexLayout::SharedConstPtr pLayout)
-        {
-            mpLayout = pLayout;
-            return *this;
-        }
+        bool result = true;
+        result = result && (fboDesc == other.fboDesc);
+        result = result && (pVertexLayout == other.pVertexLayout);
+        result = result && (pProgramKernels == other.pProgramKernels);
+        result = result && (sampleMask == other.sampleMask);
+        result = result && (primitiveType == other.primitiveType);
+        result = result && (pRasterizerState == other.pRasterizerState);
+        result = result && (pBlendState == other.pBlendState);
+        result = result && (pDepthStencilState == other.pDepthStencilState);
+        return result;
+    }
+};
 
-        Desc& setFboFormats(const Fbo::Desc& fboFormats)
-        {
-            mFboDesc = fboFormats;
-            return *this;
-        }
-
-        Desc& setProgramKernels(ProgramKernels::SharedConstPtr pProgram)
-        {
-            mpProgram = pProgram;
-            return *this;
-        }
-
-        Desc& setBlendState(BlendState::SharedPtr pBlendState)
-        {
-            mpBlendState = pBlendState;
-            return *this;
-        }
-
-        Desc& setRasterizerState(RasterizerState::SharedPtr pRasterizerState)
-        {
-            mpRasterizerState = pRasterizerState;
-            return *this;
-        }
-
-        Desc& setDepthStencilState(DepthStencilState::SharedPtr pDepthStencilState)
-        {
-            mpDepthStencilState = pDepthStencilState;
-            return *this;
-        }
-
-        Desc& setSampleMask(uint32_t sampleMask)
-        {
-            mSampleMask = sampleMask;
-            return *this;
-        }
-
-        Desc& setPrimitiveType(PrimitiveType type)
-        {
-            mPrimType = type;
-            return *this;
-        }
-
-        BlendState::SharedPtr getBlendState() const { return mpBlendState; }
-        RasterizerState::SharedPtr getRasterizerState() const { return mpRasterizerState; }
-        DepthStencilState::SharedPtr getDepthStencilState() const { return mpDepthStencilState; }
-        ProgramKernels::SharedConstPtr getProgramKernels() const { return mpProgram; }
-        ProgramVersion::SharedConstPtr getProgramVersion() const { return mpProgram->getProgramVersion(); }
-        uint32_t getSampleMask() const { return mSampleMask; }
-        VertexLayout::SharedConstPtr getVertexLayout() const { return mpLayout; }
-        PrimitiveType getPrimitiveType() const { return mPrimType; }
-        Fbo::Desc getFboDesc() const { return mFboDesc; }
-
-        bool operator==(const Desc& other) const;
-
-    private:
-        friend class GraphicsStateObject;
-        Fbo::Desc mFboDesc;
-        VertexLayout::SharedConstPtr mpLayout;
-        ProgramKernels::SharedConstPtr mpProgram;
-        RasterizerState::SharedPtr mpRasterizerState;
-        DepthStencilState::SharedPtr mpDepthStencilState;
-        BlendState::SharedPtr mpBlendState;
-        uint32_t mSampleMask = kSampleMaskAll;
-        PrimitiveType mPrimType = PrimitiveType::Undefined;
-    };
-
+class FALCOR_API GraphicsStateObject : public Object
+{
+    FALCOR_OBJECT(GraphicsStateObject)
+public:
+    GraphicsStateObject(ref<Device> pDevice, const GraphicsStateObjectDesc& desc);
     ~GraphicsStateObject();
-
-    /**
-     * Create a graphics state object.
-     * @param[in] desc State object description.
-     * @return New object, or throws an exception if creation failed.
-     */
-    static SharedPtr create(Device* pDevice, const Desc& desc);
 
     gfx::IPipelineState* getGfxPipelineState() const { return mGfxPipelineState; }
 
-    const Desc& getDesc() const { return mDesc; }
+    const GraphicsStateObjectDesc& getDesc() const { return mDesc; }
 
     gfx::IRenderPassLayout* getGFXRenderPassLayout() const { return mpGFXRenderPassLayout.get(); }
 
-private:
-    GraphicsStateObject(std::shared_ptr<Device> pDevice, const Desc& desc);
+    void breakStrongReferenceToDevice();
 
-    std::shared_ptr<Device> mpDevice;
-    Desc mDesc;
+private:
+    BreakableReference<Device> mpDevice;
+    GraphicsStateObjectDesc mDesc;
     Slang::ComPtr<gfx::IPipelineState> mGfxPipelineState;
 
     Slang::ComPtr<gfx::IInputLayout> mpGFXInputLayout;
@@ -159,8 +104,8 @@ private:
     Slang::ComPtr<gfx::IRenderPassLayout> mpGFXRenderPassLayout;
 
     // Default state objects
-    static BlendState::SharedPtr spDefaultBlendState;               // TODO: REMOVEGLOBAL
-    static RasterizerState::SharedPtr spDefaultRasterizerState;     // TODO: REMOVEGLOBAL
-    static DepthStencilState::SharedPtr spDefaultDepthStencilState; // TODO: REMOVEGLOBAL
+    static ref<BlendState> spDefaultBlendState;               // TODO: REMOVEGLOBAL
+    static ref<RasterizerState> spDefaultRasterizerState;     // TODO: REMOVEGLOBAL
+    static ref<DepthStencilState> spDefaultDepthStencilState; // TODO: REMOVEGLOBAL
 };
 } // namespace Falcor

@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -66,7 +66,7 @@ GPU_TEST(LogLuvHDR)
     ctx.runProgram((uint32_t)testData.size());
 
     // Verify results.
-    const float3* result = ctx.mapBuffer<const float3>("result");
+    std::vector<float3> result = ctx.readBuffer<float3>("result");
 
     // Test that small are reproduced as exactly zero.
     for (size_t i = 0; i < 3; i++)

@@ -25,15 +25,10 @@
  # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
-#include "Utils/Math/MathConstants.slangh"
-
 __exported import Rendering.Materials.IMaterialInstance;
-__exported import Rendering.Materials.BxDF;
 __exported import Rendering.Materials.AnisotropicGGX;
-import Utils.Color.ColorHelpers;
 import Utils.Math.MathHelpers;
 import Rendering.Materials.Fresnel;
-import Utils.Debug.PixelDebug;
 
 struct PBRTDielectricBSDF : IBSDF
 {
@@ -59,6 +54,11 @@ struct PBRTDielectricBSDF : IBSDF
 
     bool sample<S : ISampleGenerator>(float3 wiLocal, out float3 wo, out float pdf, out float3 weight, out uint lobeType, inout S sg)
     {
+        wo = {};
+        pdf = {};
+        weight = {};
+        lobeType = {};
+
         float relEta = 1.0 / eta;
 
         if (eta == 1 || D.isSingular())
@@ -142,26 +142,53 @@ struct PBRTDielectricBSDF : IBSDF
     }
 };
 
-struct PBRTDielectricMaterialInstance : IMaterialInstance
+/** PBRT dielectric material instance.
+    Note that the BSDF is implemented to handle wi/wo over the full sphere.
+    The material is treated as single-sided and the shading normal should not be flipped.
+*/
+struct PBRTDielectricMaterialInstance : MaterialInstanceBase, IMaterialInstance
 {
     ShadingFrame sf;            ///< Shading frame in world space.
     PBRTDielectricBSDF bsdf;
 
     float3 eval<S : ISampleGenerator>(const ShadingData sd, const float3 wo, inout S sg)
     {
-        return bsdf.eval(sf.toLocal(sd.V), sf.toLocal(wo), sg);
+        float3 wiLocal = sf.toLocal(sd.V);
+        float3 woLocal = sf.toLocal(wo);
+
+        if (!isValidHemisphereReflectionOrTransmission(sd, sf, wiLocal, woLocal, wo, true)) return float3(0.f);
+
+        return bsdf.eval(wiLocal, woLocal, sg);
+    }
+
+    [Differentiable]
+    float3 evalAD<S : ISampleGenerator>(const DiffMaterialData diffData, const ShadingData sd, const float3 wo, inout S sg)
+    {
+        return float3(0.f);
     }
 
     bool sample<S : ISampleGenerator>(const ShadingData sd, inout S sg, out BSDFSample result, bool useImportanceSampling = true)
     {
-        bool valid = bsdf.sample(sf.toLocal(sd.V), result.wo, result.pdf, result.weight, result.lobeType, sg);
-        result.wo = sf.fromLocal(result.wo);
-        return valid;
+        float3 wiLocal = sf.toLocal(sd.V);
+        float3 woLocal = {};
+
+        if (!bsdf.sample(wiLocal, woLocal, result.pdf, result.weight, result.lobeType, sg))
+            return false;
+        result.wo = sf.fromLocal(woLocal);
+
+        if (!isValidHemisphereReflectionOrTransmission(sd, sf, wiLocal, woLocal, result.wo, true)) return false;
+
+        return true;
     }
 
     float evalPdf(const ShadingData sd, const float3 wo, bool useImportanceSampling = true)
     {
-        return bsdf.evalPdf(sf.toLocal(sd.V), sf.toLocal(wo));
+        float3 wiLocal = sf.toLocal(sd.V);
+        float3 woLocal = sf.toLocal(wo);
+
+        if (!isValidHemisphereReflectionOrTransmission(sd, sf, wiLocal, woLocal, wo, true)) return 0.f;
+
+        return bsdf.evalPdf(wiLocal, woLocal);
     }
 
     BSDFProperties getProperties(const ShadingData sd)

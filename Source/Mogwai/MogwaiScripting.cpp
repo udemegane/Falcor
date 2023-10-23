@@ -29,6 +29,7 @@
 #include "Mogwai.h"
 #include "RenderGraph/RenderGraphIR.h"
 #include "RenderGraph/RenderGraphImportExport.h"
+#include "Utils/Scripting/Scripting.h"
 #include "Utils/Scripting/ScriptWriter.h"
 #include "Utils/Settings.h"
 #include <fstream>
@@ -92,6 +93,7 @@ namespace Mogwai
         if (mpScene)
         {
             s += "# Scene\n";
+            // In the past we did try to find a relative path to the asset search directories, for now we skip this.
             s += ScriptWriter::makeMemberFunc(kRendererVar, kLoadScene, ScriptWriter::getPathString(mpScene->getPath()));
             const std::string sceneVar = kRendererVar + "." + kScene;
             s += mpScene->getScript(sceneVar);
@@ -130,12 +132,12 @@ namespace Mogwai
         renderer.def(kSaveConfig.c_str(), &Renderer::saveConfig, "path"_a);
         renderer.def(kAddGraph.c_str(), &Renderer::addGraph, "graph"_a);
         renderer.def(kSetActiveGraph.c_str(),
-            [](Renderer* pRenderer, const RenderGraph::SharedPtr& pGraph)
+            [](Renderer* pRenderer, const ref<RenderGraph>& pGraph)
             {
                 pRenderer->setActiveGraph(pGraph);
             }, "graph"_a);
         renderer.def(kRemoveGraph.c_str(), pybind11::overload_cast<const std::string&>(&Renderer::removeGraph), "name"_a);
-        renderer.def(kRemoveGraph.c_str(), pybind11::overload_cast<const RenderGraph::SharedPtr&>(&Renderer::removeGraph), "graph"_a);
+        renderer.def(kRemoveGraph.c_str(), pybind11::overload_cast<const ref<RenderGraph>&>(&Renderer::removeGraph), "graph"_a);
         renderer.def(kGetGraph.c_str(), &Renderer::getGraph, "name"_a);
 
         auto resizeFrameBuffer = [](Renderer* pRenderer, uint32_t width, uint32_t height) { pRenderer->resizeFrameBuffer(width, height); };
@@ -194,7 +196,6 @@ namespace Mogwai
         };
 
         Scripting::getDefaultContext().setObject("fc", findExtension("Frame Capture")); // PYTHONDEPRECATED
-        Scripting::getDefaultContext().setObject("vc", findExtension("Video Capture")); // PYTHONDEPRECATED
         Scripting::getDefaultContext().setObject("tc", findExtension("Timing Capture")); // PYTHONDEPRECATED
 
         renderer.def("getSettings", pybind11::overload_cast<>(&Renderer::getSettings), pybind11::return_value_policy::reference);

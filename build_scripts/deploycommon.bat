@@ -21,11 +21,11 @@ if %IsDebug% EQU 0 (
     robocopy %ExtDir%\deps\bin\ %OutDir% /E /r:0 >nul
 ) else (
     robocopy %ExtDir%\deps\debug\bin\ %OutDir% /E /r:0 >nul
-    robocopy %ExtDir%\deps\bin\ %OutDir% assimp-vc142-mt.* /r:0 >nul
+    robocopy %ExtDir%\deps\bin\ %OutDir% assimp-vc143-mt.* /r:0 >nul
     rem Needed for OpenVDB (debug version links to release version of Half_2.5)
     robocopy %ExtDir%\deps\bin\ %OutDir% Half-2_5.* /r:0 >nul
 )
-robocopy %ExtDir%\python\ %OutDir% python37.dll /r:0 >nul
+robocopy %ExtDir%\python\ %OutDir% python*.dll /r:0 >nul
 robocopy %ExtDir%\python %OutDir%\pythondist /E /r:0 >nul
 robocopy %ExtDir%\slang\bin\windows-x64\%SlangDir% %OutDir% *.dll /r:0 >nul
 robocopy %ExtDir%\pix\bin\x64 %OutDir% WinPixEventRuntime.dll /r:0 >nul
@@ -37,6 +37,13 @@ robocopy %ExtDir%\cuda\bin\ %OutDir% cudart*.dll /r:0 >nul
 robocopy %ExtDir%\cuda\bin\ %OutDir% nvrtc*.dll /r:0 >nul
 robocopy %ExtDir%\cuda\bin\ %OutDir% cublas*.dll /r:0 >nul
 robocopy %ExtDir%\cuda\bin\ %OutDir% curand*.dll /r:0 >nul
+
+rem Copy Aftermath
+set AftermathDir=%ExtDir%\aftermath
+if exist %AftermathDir% (
+    copy /y %AftermathDir%\lib\x64\GFSDK_Aftermath_Lib.x64.dll %OutDir% >nul
+    copy /y %AftermathDir%\lib\x64\llvm_7_0_1.dll %OutDir% >nul
+)
 
 rem Copy NVAPI
 set NvApiDir=%ExtDir%\nvapi
@@ -106,6 +113,8 @@ rem Copy MDL libs after USD to overwrite older versions included in USD distribu
 set MDLDir=%ExtDir%\mdl-sdk
 if exist %MDLDir% (
     robocopy %MDLDir%\nt-x86-64\lib %OutDir% *.dll /r:0 >nul
+    if not exist %OutDir%\mdl\nvidia mkdir %OutDir%\mdl\nvidia >nul
+    robocopy %MDLDir%\examples\mdl\nvidia %OutDir%\mdl\nvidia core* /r:0 >nul
 )
 
 rem Copy NVTT

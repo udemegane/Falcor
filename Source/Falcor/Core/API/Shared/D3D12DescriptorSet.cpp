@@ -54,7 +54,7 @@ D3D12DescriptorSet::CpuHandle D3D12DescriptorSet::getCpuHandle(uint32_t rangeInd
 
 D3D12DescriptorSet::GpuHandle D3D12DescriptorSet::getGpuHandle(uint32_t rangeIndex, uint32_t descInRange) const
 {
-    throw RuntimeError("Not supported.");
+    FALCOR_THROW("Not supported.");
 }
 
 void D3D12DescriptorSet::setCpuHandle(uint32_t rangeIndex, uint32_t descIndex, const CpuHandle& handle)
@@ -67,7 +67,7 @@ void D3D12DescriptorSet::setCpuHandle(uint32_t rangeIndex, uint32_t descIndex, c
 void D3D12DescriptorSet::setSrv(uint32_t rangeIndex, uint32_t descIndex, const ShaderResourceView* pSrv)
 {
     auto type = getRange(rangeIndex).type;
-    checkInvariant(
+    FALCOR_CHECK(
         type == Type::TextureSrv || type == Type::RawBufferSrv || type == Type::TypedBufferSrv || type == Type::StructuredBufferSrv ||
             type == Type::AccelerationStructureSrv,
         "Unexpected descriptor range type in setSrv()"
@@ -78,7 +78,7 @@ void D3D12DescriptorSet::setSrv(uint32_t rangeIndex, uint32_t descIndex, const S
 void D3D12DescriptorSet::setUav(uint32_t rangeIndex, uint32_t descIndex, const UnorderedAccessView* pUav)
 {
     auto type = getRange(rangeIndex).type;
-    checkInvariant(
+    FALCOR_CHECK(
         type == Type::TextureUav || type == Type::RawBufferUav || type == Type::TypedBufferUav || type == Type::StructuredBufferUav,
         "Unexpected descriptor range type in setUav()"
     );
@@ -87,7 +87,7 @@ void D3D12DescriptorSet::setUav(uint32_t rangeIndex, uint32_t descIndex, const U
 
 void D3D12DescriptorSet::setSampler(uint32_t rangeIndex, uint32_t descIndex, const Sampler* pSampler)
 {
-    checkInvariant(getRange(rangeIndex).type == Type::Sampler, "Unexpected descriptor range type in setSampler()");
+    FALCOR_CHECK(getRange(rangeIndex).type == Type::Sampler, "Unexpected descriptor range type in setSampler()");
     setCpuHandle(rangeIndex, descIndex, pSampler->getNativeHandle().as<D3D12_CPU_DESCRIPTOR_HANDLE>());
 }
 
@@ -137,7 +137,7 @@ void D3D12DescriptorSet::bindForGraphics(CopyContext* pCtx, const D3D12RootSigna
         mpApiData->pAllocation->getHeap()->getShaderVisible() == false &&
         "DescriptorSet must be created on CPU heap for bind operation in GFX."
     );
-    ComPtr<gfx::ICommandBufferD3D12> commandBufferD3D12;
+    Slang::ComPtr<gfx::ICommandBufferD3D12> commandBufferD3D12;
     pCtx->getLowLevelData()->getGfxCommandBuffer()->queryInterface(
         SlangUUID SLANG_UUID_ICommandBufferD3D12, (void**)commandBufferD3D12.writeRef()
     );
@@ -155,7 +155,7 @@ void D3D12DescriptorSet::bindForCompute(CopyContext* pCtx, const D3D12RootSignat
         mpApiData->pAllocation->getHeap()->getShaderVisible() == false &&
         "DescriptorSet must be created on CPU heap for bind operation in GFX."
     );
-    ComPtr<gfx::ICommandBufferD3D12> commandBufferD3D12;
+    Slang::ComPtr<gfx::ICommandBufferD3D12> commandBufferD3D12;
     pCtx->getLowLevelData()->getGfxCommandBuffer()->queryInterface(
         SlangUUID SLANG_UUID_ICommandBufferD3D12, (void**)commandBufferD3D12.writeRef()
     );
@@ -169,43 +169,39 @@ void D3D12DescriptorSet::bindForCompute(CopyContext* pCtx, const D3D12RootSignat
 
 void D3D12DescriptorSet::setCbv(uint32_t rangeIndex, uint32_t descIndex, D3D12ConstantBufferView* pView)
 {
-    checkInvariant(getRange(rangeIndex).type == Type::Cbv, "Unexpected descriptor range type in setCbv()");
+    FALCOR_CHECK(getRange(rangeIndex).type == Type::Cbv, "Unexpected descriptor range type in setCbv()");
     setCpuHandle(rangeIndex, descIndex, pView->getD3D12CpuHeapHandle());
 }
 
-D3D12DescriptorSet::SharedPtr D3D12DescriptorSet::create(
-    Device* pDevice,
-    const D3D12DescriptorPool::SharedPtr& pPool,
+ref<D3D12DescriptorSet> D3D12DescriptorSet::create(
+    ref<Device> pDevice,
+    ref<D3D12DescriptorPool> pPool,
     const D3D12DescriptorSetLayout& layout
 )
 {
     FALCOR_ASSERT(pDevice);
     pDevice->requireD3D12();
-    return SharedPtr(new D3D12DescriptorSet(pDevice->shared_from_this(), pPool, layout));
+    return ref<D3D12DescriptorSet>(new D3D12DescriptorSet(pDevice, pPool, layout));
 }
 
-D3D12DescriptorSet::SharedPtr D3D12DescriptorSet::create(
-    Device* pDevice,
+ref<D3D12DescriptorSet> D3D12DescriptorSet::create(
+    ref<Device> pDevice,
     const D3D12DescriptorSetLayout& layout,
     D3D12DescriptorSetBindingUsage bindingUsage
 )
 {
     FALCOR_ASSERT(pDevice);
     pDevice->requireD3D12();
-    return SharedPtr(new D3D12DescriptorSet(
-        pDevice->shared_from_this(),
+    return ref<D3D12DescriptorSet>(new D3D12DescriptorSet(
+        pDevice,
         bindingUsage == D3D12DescriptorSetBindingUsage::RootSignatureOffset ? pDevice->getD3D12GpuDescriptorPool()
                                                                             : pDevice->getD3D12CpuDescriptorPool(),
         layout
     ));
 }
 
-D3D12DescriptorSet::D3D12DescriptorSet(
-    std::shared_ptr<Device> pDevice,
-    D3D12DescriptorPool::SharedPtr pPool,
-    const D3D12DescriptorSetLayout& layout
-)
-    : mpDevice(std::move(pDevice)), mLayout(layout), mpPool(pPool)
+D3D12DescriptorSet::D3D12DescriptorSet(ref<Device> pDevice, ref<D3D12DescriptorPool> pPool, const D3D12DescriptorSetLayout& layout)
+    : mpDevice(pDevice), mLayout(layout), mpPool(pPool)
 {
     mpApiData = std::make_shared<DescriptorSetApiData>();
     uint32_t count = 0;
@@ -234,7 +230,7 @@ D3D12DescriptorSet::D3D12DescriptorSet(
 
     // Allocation failed again, there is nothing else we can do.
     if (mpApiData->pAllocation == nullptr)
-        throw RuntimeError("Failed to create descriptor set");
+        FALCOR_THROW("Failed to create descriptor set");
 
     mpApiData->descriptorCount = count;
 }

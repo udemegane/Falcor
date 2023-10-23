@@ -33,20 +33,19 @@ namespace Falcor
  */
 GPU_TEST(ParamBlockCB)
 {
-    Device* pDevice = ctx.getDevice().get();
+    ref<Device> pDevice = ctx.getDevice();
 
-    ctx.createProgram("Tests/Core/ParamBlockCB.cs.slang", "main", Program::DefineList(), Shader::CompilerFlags::None);
+    ctx.createProgram("Tests/Core/ParamBlockCB.cs.slang", "main");
     ctx.allocateStructuredBuffer("result", 1);
 
     auto pBlockReflection = ctx.getProgram()->getReflector()->getParameterBlock("gParamBlock");
     auto pParamBlock = ParameterBlock::create(pDevice, pBlockReflection);
-    pParamBlock["a"] = 42.1f;
+    pParamBlock->getRootVar()["a"] = 42.1f;
 
     ctx["gParamBlock"] = pParamBlock;
     ctx.runProgram(1, 1, 1);
 
-    const float* result = ctx.mapBuffer<const float>("result");
+    std::vector<float> result = ctx.readBuffer<float>("result");
     EXPECT_EQ(result[0], 42.1f);
-    ctx.unmapBuffer("result");
 }
 } // namespace Falcor

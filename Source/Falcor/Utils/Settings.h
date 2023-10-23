@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -27,13 +27,9 @@
  **************************************************************************/
 #pragma once
 #include "Core/Macros.h"
-#include "Core/Assert.h"
-#include "Core/Platform/SearchDirectories.h"
-#include "Utils/Scripting/Dictionary.h"
+#include "Core/Error.h"
 
 #include <nlohmann/json.hpp>
-#include <pybind11/pybind11.h>
-#include <pybind11_json/pybind11_json.hpp>
 
 #include <regex>
 #include <optional>
@@ -41,6 +37,11 @@
 #include <map>
 #include <filesystem>
 #include <vector>
+
+namespace pybind11
+{
+class dict;
+}
 
 namespace Falcor
 {
@@ -92,7 +93,9 @@ private:
         return true;
     }
 
-    template<typename T>
+    // The "gccfix" parameter is used to avoid "explicit specialization in non-namespace scope" in gcc.
+    // See https://gcc.gnu.org/bugzilla/show_bug.cgi?id=85282
+    template<typename T, typename gccfix = void>
     struct JsonCaster
     {
         static T cast(const nlohmann::json& json)
@@ -106,8 +109,8 @@ private:
         }
     };
 
-    template<>
-    struct JsonCaster<bool>
+    template<typename gccfix>
+    struct JsonCaster<bool, gccfix>
     {
         static bool cast(const nlohmann::json& json)
         {
@@ -117,8 +120,8 @@ private:
         }
     };
 
-    template<>
-    struct JsonCaster<SettingsProperties>
+    template<typename gccfix>
+    struct JsonCaster<SettingsProperties, gccfix>
     {
         static SettingsProperties cast(const nlohmann::json& json)
         {
@@ -129,14 +132,14 @@ private:
         }
     };
 
-    template<>
-    struct JsonCaster<nlohmann::json>
+    template<typename gccfix>
+    struct JsonCaster<nlohmann::json, gccfix>
     {
         static nlohmann::json cast(const nlohmann::json& json) { return json; }
     };
 
-    template<typename U, size_t N>
-    struct JsonCaster<std::array<U, N>>
+    template<typename U, size_t N, typename gccfix>
+    struct JsonCaster<std::array<U, N>, gccfix>
     {
         using ArrayType = std::array<U, N>;
         static bool assertHelper(const nlohmann::json& json) { return isType<ArrayType, U, N>(json); }
@@ -159,7 +162,8 @@ public:
     template<typename T>
     std::optional<T> get(const std::string_view name) const
     {
-        FALCOR_ASSERT_MSG(!name.empty() && name.data()[name.size()] == 0, "The underlying library requires names to be null terminated");
+        // The underlying library requires attribute names to be null terminated
+        FALCOR_ASSERT(!name.empty() && name.data()[name.size()] == 0);
 
         // Handle the : in names as nesting separator
         {
@@ -198,7 +202,8 @@ public:
     template<typename T>
     T get(const std::string_view name, const T& def) const
     {
-        FALCOR_ASSERT_MSG(!name.empty() && name.data()[name.size()] == 0, "The underlying library requires names to be null terminated");
+        // The underlying library requires attribute names to be null terminated
+        FALCOR_ASSERT(!name.empty() && name.data()[name.size()] == 0);
 
         std::optional<T> opt = get<T>(name);
         return opt ? *opt : def;
@@ -207,7 +212,8 @@ public:
     // Do we have a property of the given name
     bool has(const std::string_view name) const
     {
-        FALCOR_ASSERT_MSG(!name.empty() && name.data()[name.size()] == 0, "The underlying library requires names to be null terminated");
+        // The underlying library requires attribute names to be null terminated
+        FALCOR_ASSERT(!name.empty() && name.data()[name.size()] == 0);
 
         // Handle the : in names as nesting separator
         {
@@ -235,7 +241,8 @@ public:
     template<typename T>
     bool has(const std::string_view name) const
     {
-        FALCOR_ASSERT_MSG(!name.empty() && name.data()[name.size()] == 0, "The underlying library requires names to be null terminated");
+        // The underlying library requires attribute names to be null terminated
+        FALCOR_ASSERT(!name.empty() && name.data()[name.size()] == 0);
 
         // Handle the : in names as nesting separator
         {
@@ -267,7 +274,8 @@ private:
     // Do we have a property of the given name
     bool hasExact(const std::string_view name) const
     {
-        FALCOR_ASSERT_MSG(!name.empty() && name.data()[name.size()] == 0, "The underlying library requires names to be null terminated");
+        // The underlying library requires attribute names to be null terminated
+        FALCOR_ASSERT(!name.empty() && name.data()[name.size()] == 0);
 
         return mDictionary->contains(name);
     }
@@ -276,7 +284,8 @@ private:
     template<typename T>
     bool hasExact(const std::string_view name) const
     {
-        FALCOR_ASSERT_MSG(!name.empty() && name.data()[name.size()] == 0, "The underlying library requires names to be null terminated");
+        // The underlying library requires attribute names to be null terminated
+        FALCOR_ASSERT(!name.empty() && name.data()[name.size()] == 0);
 
         if (!has(name))
             return false;
@@ -293,6 +302,11 @@ private:
 class FALCOR_API Settings
 {
 public:
+    using SearchDirectories = std::vector<std::filesystem::path>;
+
+    /// Get the global settings instance.
+    static Settings& getGlobalSettings();
+
     Settings() : mData(1) {}
 
     SettingsProperties getOptions() const { return SettingsProperties(&getActive().mOptions); }
@@ -311,34 +325,28 @@ public:
 
     // Adds to global option list.
     // It is a nested list of dictionaries
-    void addOptions(const pybind11::dict& options)
-    {
-        auto json = pyjson::to_json(options);
-        merge(getActive().mOptions, json);
-        updateSearchPaths(json);
-    }
-    void addOptions(const Dictionary& options) { addOptions(options.toPython()); }
+    void addOptions(const pybind11::dict& options);
+
     /// Add options from a JSON file, returning true on success and false on failure
     bool addOptions(const std::filesystem::path& path);
 
     // Clears the global options to defaults
     void clearOptions() { getActive().mOptions.clear(); }
 
-    /** Attributes don't really belong here. They should be part of the loadScene.
-        However, if you load scenes from the GUI, you want the attributes to get applied to all the scenes
-        (think setting attributes to "make all curves tessellate fine").
-
-        So this, which is effectively an attribute filter (RIF, if you will) need to live in some
-        reasonably global place. This will be replaced with a more principled solution in the new Scene.
-    */
+    /**
+     * Attributes don't really belong here. They should be part of the loadScene.
+     * However, if you load scenes from the GUI, you want the attributes to get applied to all the scenes
+     * (think setting attributes to "make all curves tessellate fine").
+     *
+     * So this, which is effectively an attribute filter (RIF, if you will) need to live in some
+     * reasonably global place. This will be replaced with a more principled solution in the new Scene.
+     */
 
     template<typename T>
     std::optional<T> getAttribute(const std::string_view shapeName, const std::string_view attributeName) const
     {
-        FALCOR_ASSERT_MSG(
-            !attributeName.empty() && attributeName.data()[attributeName.size()] == 0,
-            "The underlying library requires attribute names to be null terminated"
-        );
+        // The underlying library requires attribute names to be null terminated
+        FALCOR_ASSERT(!attributeName.empty() && attributeName.data()[attributeName.size()] == 0);
 
         SettingsProperties props(&getActive().mFilteredAttributes);
 
@@ -366,7 +374,7 @@ public:
         else
         {
             nlohmann::json array = *props.get<nlohmann::json>(attributeNameFilter);
-            FALCOR_ASSERT_MSG(array.is_array(), "Assume it is a list otherwise");
+            FALCOR_CHECK(array.is_array(), "Expecting an array");
             expression = array[0].get<std::string>();
             if (array.size() > 1)
                 negateRegex = array[1].get<bool>();
@@ -381,10 +389,8 @@ public:
     template<typename T>
     T getAttribute(const std::string_view shapeName, const std::string_view attributeName, const T& def) const
     {
-        FALCOR_ASSERT_MSG(
-            !attributeName.empty() && attributeName.data()[attributeName.size()] == 0,
-            "The underlying library requires attribute names to be null terminated"
-        );
+        // The underlying library requires attribute names to be null terminated
+        FALCOR_ASSERT(!attributeName.empty() && attributeName.data()[attributeName.size()] == 0);
 
         auto opt = getAttribute<T>(shapeName, attributeName);
         return opt ? *opt : def;
@@ -425,11 +431,10 @@ public:
     // will *NOT* disable motion on everything and then re-enable it for the tiger,
     // they will only set the "enableMotion = False" on the Tiger, while leaving
     // everything else to default (which happens to be "False" as well)
-    void addFilteredAttributes(const pybind11::dict& attributes) { merge(getActive().mFilteredAttributes, pyjson::to_json(attributes)); }
-    void addFilteredAttributes(const Dictionary& attributes) { addFilteredAttributes(attributes.toPython()); }
+    void addFilteredAttributes(const pybind11::dict& attributes);
 
     // Clears all the attributes to default
-    void clearFilteredAttributes() { getActive().mFilteredAttributes.clear(); }
+    void clearFilteredAttributes();
 
     /**
      * Returns search paths from the given category.

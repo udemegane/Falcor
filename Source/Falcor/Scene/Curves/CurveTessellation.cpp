@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -26,20 +26,20 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #include "CurveTessellation.h"
-#include "Core/Assert.h"
+#include "Core/Error.h"
 #include "Utils/Math/Common.h"
 #include "Utils/Math/MathHelpers.h"
 #include "Utils/Math/CubicSpline.h"
-#include "Utils/Math/Matrix/Matrix.h"
-#include <glm/gtx/quaternion.hpp>
+#include "Utils/Math/Matrix.h"
+#include "Utils/Math/Quaternion.h"
 #include <cmath>
 
 namespace Falcor
 {
     struct StrandArrays {
-        std::vector<float3> controlPoints;
-        std::vector<float>  widths;
-        std::vector<float2> UVs;
+        fast_vector<float3> controlPoints;
+        fast_vector<float>  widths;
+        fast_vector<float2> UVs;
         uint32_t vertexCount { 0 };
     };
 
@@ -74,21 +74,28 @@ namespace Falcor
         // To achieve curveWidth on average, however, we need to scale the initial curveWidth by 1.11 (the number was deducted numerically).
         const float kMeshCompensationScale = 1.11f;
 
-        float4 transformSphere(const rmcv::mat4& xform, const float4& sphere)
+        float4 transformSphere(const float4x4& xform, const float4& sphere)
         {
             // Spheres are represented as (center.x, center.y, center.z, radius).
             // Assume the scaling is isotropic, i.e., the end points are still spheres after transformation.
 #if 1
             float  scale = std::sqrt(xform[0][0] * xform[0][0] + xform[0][1] * xform[0][1] + xform[0][2] * xform[0][2]);
-            float3 xyz = xform * float4(sphere.xyz, 1.f);
+            float3 xyz = transformPoint(xform, sphere.xyz());
             return float4(xyz, sphere.w * scale);
 #else
-            float3 q = sphere.xyz + float3(sphere.w, 0, 0);
-            float4 xp = xform * float4(sphere.xyz, 1.f);
+            float3 q = sphere.xyz() + float3(sphere.w, 0, 0);
+            float4 xp = xform * float4(sphere.xyz(), 1.f);
             float4 xq = xform * float4(q, 1.f);
-            float xr = glm::length(xq.xyz - xp.xyz);
-            return float4(xp.xyz, xr);
+            float xr = length(xq.xyz() - xp.xyz());
+            return float4(xp.xyz(), xr);
 #endif
+        }
+
+        /// Sanitize radius so it is never 0, as non-zero radius is used to distinguish
+        /// between mesh-from-curves and native mesh, which is used intersection and epsilon calculations.
+        inline float sanitizeWidth(float w)
+        {
+            return std::max(w, (float)std::numeric_limits<float16_t>::min());
         }
 
         void optimizeStrandGeometry(CubicSplineCache& splineCache, const CurveArrays& curveArrays, StrandArrays& strandArrays, StrandArrays& optimizedStrandArrays, uint32_t pointOffset, uint32_t subdivPerSegment, uint32_t keepOneEveryXVerticesPerStrand, float widthScale)
@@ -100,7 +107,7 @@ namespace Falcor
             // Optimize geometry by removing duplicates.
             for (uint32_t j = 0; j < strandArrays.vertexCount - 1; j++)
             {
-                if (curveArrays.controlPoints[pointOffset + j] != curveArrays.controlPoints[pointOffset + j + 1])
+                if (any(curveArrays.controlPoints[pointOffset + j] != curveArrays.controlPoints[pointOffset + j + 1]))
                 {
                     strandArrays.controlPoints.push_back(curveArrays.controlPoints[pointOffset + j]);
                     strandArrays.widths.push_back(curveArrays.widths[pointOffset + j]);
@@ -127,7 +134,7 @@ namespace Falcor
                     {
                         float t = (float)k / (float)subdivPerSegment;
                         optimizedStrandArrays.controlPoints.push_back(splinePoints.interpolate(j, t));
-                        optimizedStrandArrays.widths.push_back(kMeshCompensationScale * widthScale * splineWidths.interpolate(j, t));
+                        optimizedStrandArrays.widths.push_back(sanitizeWidth(kMeshCompensationScale * widthScale * splineWidths.interpolate(j, t)));
                     }
                     tmpCount++;
                 }
@@ -135,7 +142,7 @@ namespace Falcor
 
             // Always keep the last vertex.
             optimizedStrandArrays.controlPoints.push_back(splinePoints.interpolate(optimizedStrandArrays.vertexCount - 2, 1.f));
-            optimizedStrandArrays.widths.push_back(kMeshCompensationScale * widthScale * splineWidths.interpolate(optimizedStrandArrays.vertexCount - 2, 1.f));
+            optimizedStrandArrays.widths.push_back(sanitizeWidth(kMeshCompensationScale * widthScale * splineWidths.interpolate(optimizedStrandArrays.vertexCount - 2, 1.f)));
 
             // Texture coordinates.
             if (curveArrays.UVs)
@@ -164,7 +171,7 @@ namespace Falcor
         {
             float3 prevFwd;
 
-            if (j <= 0 || j >= strandArrays.controlPoints.size())
+            if (j <= 0 || j >= strandArrays.controlPoints.size() || strandArrays.controlPoints.size() == 2)
             {
                 // The forward tangents should be the same, meaning s & t are also the same
                 prevFwd = fwd;
@@ -186,12 +193,17 @@ namespace Falcor
             }
 
             // Use quaternions to smoothly rotate the other vectors and update s & t vectors.
-            glm::quat rotQuat = glm::rotation(prevFwd, fwd);
-            s = glm::rotate(rotQuat, s);
-            t = glm::rotate(rotQuat, t);
+            quatf rotQuat = math::quatFromRotationBetweenVectors(prevFwd, fwd);
+            s = mul(rotQuat, s);
+            t = normalize(cross(fwd, s));
+            s = normalize(cross(t, fwd));
+
+            FALCOR_ASSERT_LT(std::abs(length(fwd) - 1.f), 1e-3f);
+            FALCOR_ASSERT_LT(std::abs(length(s) - 1.f), 1e-3f);
+            FALCOR_ASSERT_LT(std::abs(length(t) - 1.f), 1e-3f);
         }
 
-        void updateMeshResultBuffers(CurveTessellation::MeshResult& result, const CurveArrays& curveArrays, StrandArrays& optimizedStrandArrays, const float3& fwd, const float3& s, const float3& t, uint32_t pointCountPerCrossSection, const float& widthScale, uint32_t j)
+        void updateMeshResultBuffers(CurveTessellation::MeshResult& result, const CurveArrays& curveArrays, StrandArrays& optimizedStrandArrays, const float3& fwd, const float3& s, const float3& t, uint32_t pointCountPerCrossSection, uint32_t j)
         {
             // Mesh vertices, normals, tangents, and texCrds (if any).
             for (uint32_t k = 0; k < pointCountPerCrossSection; k++)
@@ -229,7 +241,7 @@ namespace Falcor
         }
     }
 
-    CurveTessellation::SweptSphereResult CurveTessellation::convertToLinearSweptSphere(uint32_t strandCount, const uint32_t* vertexCountsPerStrand, const float3* controlPoints, const float* widths, const float2* UVs, uint32_t degree, uint32_t subdivPerSegment, uint32_t keepOneEveryXStrands, uint32_t keepOneEveryXVerticesPerStrand, float widthScale, const rmcv::mat4& xform)
+    CurveTessellation::SweptSphereResult CurveTessellation::convertToLinearSweptSphere(uint32_t strandCount, const uint32_t* vertexCountsPerStrand, const float3* controlPoints, const float* widths, const float2* UVs, uint32_t degree, uint32_t subdivPerSegment, uint32_t keepOneEveryXStrands, uint32_t keepOneEveryXVerticesPerStrand, float widthScale, const float4x4& xform)
     {
         SweptSphereResult result;
 
@@ -287,9 +299,9 @@ namespace Falcor
                         result.indices.push_back((uint32_t)result.points.size());
 
                         // Pre-transform curve points.
-                        float4 sph = transformSphere(xform, float4(splinePoints.interpolate(j, t), splineWidths.interpolate(j, t) * 0.5f * widthScale));
+                        float4 sph = transformSphere(xform, float4(splinePoints.interpolate(j, t), sanitizeWidth(splineWidths.interpolate(j, t) * 0.5f * widthScale)));
 
-                        result.points.push_back(sph.xyz);
+                        result.points.push_back(sph.xyz());
                         result.radius.push_back(sph.w);
                     }
                     tmpCount++;
@@ -297,8 +309,8 @@ namespace Falcor
             }
 
             // Always keep the last vertex.
-            float4 sph = transformSphere(xform, float4(splinePoints.interpolate(optimizedStrandArrays.vertexCount - 2, 1.f), splineWidths.interpolate(optimizedStrandArrays.vertexCount - 2, 1.f) * 0.5f * widthScale));
-            result.points.push_back(sph.xyz);
+            float4 sph = transformSphere(xform, float4(splinePoints.interpolate(optimizedStrandArrays.vertexCount - 2, 1.f), sanitizeWidth(splineWidths.interpolate(optimizedStrandArrays.vertexCount - 2, 1.f) * 0.5f * widthScale)));
+            result.points.push_back(sph.xyz());
             result.radius.push_back(sph.w);
 
             // Texture coordinates.
@@ -377,6 +389,7 @@ namespace Falcor
             // Build the initial frame.
             float3 fwd, s, t;
             fwd = normalize(optimizedStrandArrays.controlPoints[1] - optimizedStrandArrays.controlPoints[0]);
+            FALCOR_ASSERT_LT(std::abs(length(fwd) - 1.f), 1e-3f);
             buildFrame(fwd, s, t);
 
             // Create mesh.
@@ -386,7 +399,7 @@ namespace Falcor
                 updateCurveFrame(optimizedStrandArrays, fwd, s, t, j);
 
                 // Mesh vertices, normals, tangents, and texCrds (if any).
-                updateMeshResultBuffers(result, curveArrays, optimizedStrandArrays, fwd, s, t, pointCountPerCrossSection, widthScale, j);
+                updateMeshResultBuffers(result, curveArrays, optimizedStrandArrays, fwd, s, t, pointCountPerCrossSection, j);
 
                 // Mesh faces.
                 if (j < optimizedStrandArrays.controlPoints.size() - 1)
@@ -398,6 +411,7 @@ namespace Falcor
 
             meshVertexOffset += pointCountPerCrossSection * (uint32_t)optimizedStrandArrays.controlPoints.size();
         }
+
         return result;
     }
 

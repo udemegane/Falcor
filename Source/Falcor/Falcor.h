@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -30,16 +30,13 @@
 // Core
 #include "Core/Macros.h"
 #include "Core/Version.h"
-#include "Core/FalcorConfig.h"
-#include "Core/Assert.h"
-#include "Core/ErrorHandling.h"
-#include "Core/Errors.h"
+#include "Core/Error.h"
 
 // Core/Platform
 #include "Core/Platform/OS.h"
 
 // Core/API
-#include "Core/API/Common.h"
+#include "Core/API/Types.h"
 #include "Core/API/BlendState.h"
 #include "Core/API/Buffer.h"
 #include "Core/API/ComputeContext.h"
@@ -50,7 +47,7 @@
 #include "Core/API/FBO.h"
 #include "Core/API/FencedPool.h"
 #include "Core/API/Formats.h"
-#include "Core/API/GpuFence.h"
+#include "Core/API/Fence.h"
 #include "Core/API/GpuTimer.h"
 #include "Core/API/GraphicsStateObject.h"
 #include "Core/API/IndirectCommands.h"
@@ -74,13 +71,10 @@
 #include "Core/Platform/ProgressBar.h"
 
 // Core/Program
-#include "Core/Program/ComputeProgram.h"
-#include "Core/Program/GraphicsProgram.h"
 #include "Core/Program/Program.h"
 #include "Core/Program/ProgramReflection.h"
 #include "Core/Program/ProgramVars.h"
 #include "Core/Program/ProgramVersion.h"
-#include "Core/Program/RtProgram.h"
 
 // Core/State
 #include "Core/State/ComputeState.h"
@@ -98,18 +92,13 @@
 #include "Scene/Animation/Animation.h"
 #include "Scene/Animation/AnimationController.h"
 
-// @skallweit: This is temporary to allow renderpasses to be compiled unmodified. Needs to be removed.
-#include "RenderGraph/RenderPass.h"
-
 // Utils
 #include "Utils/StringFormatters.h"
 #include "Utils/Math/Common.h"
 #include "Utils/Math/Vector.h"
-#include "Utils/Math/Float16.h"
 #include "Utils/Logger.h"
 #include "Utils/UI/InputTypes.h"
 #include "Utils/Timing/Profiler.h"
-#include "Utils/Scripting/Scripting.h"
 
 #include <fmt/format.h> // TODO C++20: Replace with <format>
 #include <fstd/span.h>  // TODO C++20: Replace with <span>

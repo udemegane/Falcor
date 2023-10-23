@@ -28,31 +28,28 @@
 #pragma once
 #include "fwd.h"
 #include "Handles.h"
-#include "GpuFence.h"
+#include "Resource.h"
+#include "Buffer.h"
+#include "Fence.h"
 #include "Core/Macros.h"
-#include <memory>
+#include "Core/Object.h"
 #include <queue>
 #include <unordered_map>
 
 namespace Falcor
 {
-class FALCOR_API GpuMemoryHeap
+class FALCOR_API GpuMemoryHeap : public Object
 {
+    FALCOR_OBJECT(GpuMemoryHeap)
 public:
-    using SharedPtr = std::shared_ptr<GpuMemoryHeap>;
-
-    enum class Type
-    {
-        Default,
-        Upload,
-        Readback
-    };
-
     struct BaseData
     {
         Slang::ComPtr<gfx::IBufferResource> gfxBufferResource;
+        uint32_t size = 0;
         GpuAddress offset = 0;
         uint8_t* pData = nullptr;
+
+        uint64_t getGpuAddress() const { return gfxBufferResource->getDeviceAddress() + offset; }
     };
 
     struct Allocation : public BaseData
@@ -60,7 +57,7 @@ public:
         uint64_t pageID = 0;
         uint64_t fenceValue = 0;
 
-        static const uint64_t kMegaPageId = -1;
+        static constexpr uint64_t kMegaPageId = -1;
         bool operator<(const Allocation& other) const { return fenceValue > other.fenceValue; }
     };
 
@@ -68,20 +65,23 @@ public:
 
     /**
      * Create a new GPU memory heap.
-     * @param[in] type The type of heap.
+     * @param[in] memoryType The memory type of heap.
      * @param[in] pageSize Page size in bytes.
      * @param[in] pFence Fence to use for synchronization.
      * @return A new object, or throws an exception if creation failed.
      */
-    static SharedPtr create(Device* pDevice, Type type, size_t pageSize, const GpuFence::SharedPtr& pFence);
+    static ref<GpuMemoryHeap> create(ref<Device> pDevice, MemoryType memoryType, size_t pageSize, ref<Fence> pFence);
 
     Allocation allocate(size_t size, size_t alignment = 1);
+    Allocation allocate(size_t size, ResourceBindFlags bindFlags);
     void release(Allocation& data);
     size_t getPageSize() const { return mPageSize; }
     void executeDeferredReleases();
 
+    void breakStrongReferenceToDevice();
+
 private:
-    GpuMemoryHeap(std::shared_ptr<Device> pDevice, Type type, size_t pageSize, const GpuFence::SharedPtr& pFence);
+    GpuMemoryHeap(ref<Device> pDevice, MemoryType memoryType, size_t pageSize, ref<Fence> pFence);
 
     struct PageData : public BaseData
     {
@@ -91,9 +91,9 @@ private:
         using UniquePtr = std::unique_ptr<PageData>;
     };
 
-    std::shared_ptr<Device> mpDevice;
-    Type mType;
-    GpuFence::SharedPtr mpFence;
+    BreakableReference<Device> mpDevice;
+    MemoryType mMemoryType;
+    ref<Fence> mpFence;
     size_t mPageSize = 0;
     size_t mCurrentPageId = 0;
     PageData::UniquePtr mpActivePage;

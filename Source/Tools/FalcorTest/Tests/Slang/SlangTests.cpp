@@ -39,14 +39,14 @@ namespace Falcor
 {
 namespace
 {
-void testEnum(GPUUnitTestContext& ctx, const std::string& shaderModel)
+void testEnum(GPUUnitTestContext& ctx, ShaderModel shaderModel)
 {
-    ctx.createProgram("Tests/Slang/SlangTests.cs.slang", "testEnum", Program::DefineList(), Shader::CompilerFlags::None, shaderModel);
+    ctx.createProgram("Tests/Slang/SlangTests.cs.slang", "testEnum", DefineList(), SlangCompilerFlags::None, shaderModel);
     ctx.allocateStructuredBuffer("result", 12);
     ctx.runProgram(1, 1, 1);
 
     // Verify results.
-    const uint32_t* result = ctx.mapBuffer<const uint32_t>("result");
+    std::vector<uint32_t> result = ctx.readBuffer<uint32_t>("result");
 
     EXPECT_EQ(result[0], (uint32_t)Type1::A);
     EXPECT_EQ(result[1], (uint32_t)Type1::B);
@@ -62,8 +62,6 @@ void testEnum(GPUUnitTestContext& ctx, const std::string& shaderModel)
     EXPECT_EQ(result[9], (uint32_t)Type3::B);
     EXPECT_EQ(result[10], (uint32_t)Type3::C);
     EXPECT_EQ(result[11], (uint32_t)Type3::D);
-
-    ctx.unmapBuffer("result");
 }
 
 uint64_t asuint64(double a)
@@ -80,9 +78,9 @@ uint64_t asuint64(double a)
 */
 GPU_TEST(SlangEnum)
 {
-    testEnum(ctx, ""); // Use default shader model for the unit test system
-    testEnum(ctx, "6_0");
-    testEnum(ctx, "6_3");
+    testEnum(ctx, ShaderModel::Unknown); // Use default shader model for the unit test system
+    testEnum(ctx, ShaderModel::SM6_0);
+    testEnum(ctx, ShaderModel::SM6_3);
 }
 
 /** Test fixed-width scalar type support including 16-bit types (shader model 6.2+).
@@ -95,12 +93,12 @@ GPU_TEST(SlangScalarTypes)
 {
     const uint32_t maxTests = 100;
 
-    ctx.createProgram("Tests/Slang/SlangTests.cs.slang", "testScalarTypes", Program::DefineList(), Shader::CompilerFlags::None, "6_2");
+    ctx.createProgram("Tests/Slang/SlangTests.cs.slang", "testScalarTypes", DefineList(), SlangCompilerFlags::None, ShaderModel::SM6_2);
     ctx.allocateStructuredBuffer("result", maxTests);
     ctx.runProgram(1, 1, 1);
 
     // Verify results.
-    const uint32_t* result = ctx.mapBuffer<const uint32_t>("result");
+    std::vector<uint32_t> result = ctx.readBuffer<uint32_t>("result");
 
     int i = 0;
 
@@ -155,7 +153,6 @@ GPU_TEST(SlangScalarTypes)
     EXPECT_EQ(result[i], 0x12345678);
     i++;
 
-    ctx.unmapBuffer("result");
     FALCOR_ASSERT(i < maxTests);
 }
 
@@ -166,37 +163,36 @@ GPU_TEST(SlangDefaultInitializers)
     const uint32_t maxTests = 100, usedTests = 43;
     std::vector<uint32_t> initData(maxTests, -1);
 
-    auto test = [&](const std::string& shaderModel)
+    auto test = [&](ShaderModel shaderModel)
     {
         ctx.createProgram(
-            "Tests/Slang/SlangTests.cs.slang", "testDefaultInitializers", Program::DefineList(), Shader::CompilerFlags::None, shaderModel
+            "Tests/Slang/SlangTests.cs.slang", "testDefaultInitializers", DefineList(), SlangCompilerFlags::None, shaderModel
         );
         ctx.allocateStructuredBuffer("result", maxTests, initData.data(), initData.size() * sizeof(initData[0]));
         ctx.runProgram(1, 1, 1);
 
         // Verify results.
-        const uint32_t* result = ctx.mapBuffer<const uint32_t>("result");
+        std::vector<uint32_t> result = ctx.readBuffer<uint32_t>("result");
         for (uint32_t i = 0; i < maxTests; i++)
         {
             uint32_t expected = i < usedTests ? 0 : -1;
             if (i == 42)
                 expected = (uint32_t)Type3::C;
 
-            EXPECT_EQ(result[i], expected) << "i = " << i << " (sm" << shaderModel << ")";
+            EXPECT_EQ(result[i], expected) << "i = " << i << " (" << enumToString(shaderModel) << ")";
         }
-        ctx.unmapBuffer("result");
     };
 
     // Test the default shader model, followed by specific models.
-    test("");
-    test("6_0");
-    test("6_1");
-    test("6_2");
-    test("6_3");
-    test("6_5");
+    test(ShaderModel::Unknown);
+    test(ShaderModel::SM6_0);
+    test(ShaderModel::SM6_1);
+    test(ShaderModel::SM6_2);
+    test(ShaderModel::SM6_3);
+    test(ShaderModel::SM6_5);
 #if FALCOR_HAS_D3D12_AGILITY_SDK
     if (ctx.getDevice()->getType() == Device::Type::D3D12)
-        test("6_6");
+        test(ShaderModel::SM6_6);
 #endif
 }
 
@@ -213,13 +209,11 @@ GPU_TEST(SlangHashedStrings)
     EXPECT_EQ(hashedStrings[2].string, "Test String 2");
     EXPECT_EQ(hashedStrings[3].string, "Test String 3");
 
-    const uint32_t* result = ctx.mapBuffer<const uint32_t>("result");
+    std::vector<uint32_t> result = ctx.readBuffer<uint32_t>("result");
 
     for (size_t i = 0; i < 4; ++i)
     {
         EXPECT_EQ(result[i], hashedStrings[i].hash);
     }
-
-    ctx.unmapBuffer("result");
 }
 } // namespace Falcor

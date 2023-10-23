@@ -40,12 +40,13 @@
 
 namespace Falcor
 {
+class GraphicsStateObject;
 class GraphicsState;
-class GraphicsVars;
+class ProgramVars;
 
 class RenderTargetView;
 
-class RtProgram;
+class Program;
 class RtProgramVars;
 
 struct BlitContext;
@@ -151,7 +152,7 @@ public:
      * @param[in] vertexCount Number of vertices to draw
      * @param[in] startVertexLocation The location of the first vertex to read from the vertex buffers (offset in vertices)
      */
-    void draw(GraphicsState* pState, GraphicsVars* pVars, uint32_t vertexCount, uint32_t startVertexLocation);
+    void draw(GraphicsState* pState, ProgramVars* pVars, uint32_t vertexCount, uint32_t startVertexLocation);
 
     /**
      * Ordered instanced draw call.
@@ -162,7 +163,7 @@ public:
      */
     void drawInstanced(
         GraphicsState* pState,
-        GraphicsVars* pVars,
+        ProgramVars* pVars,
         uint32_t vertexCount,
         uint32_t instanceCount,
         uint32_t startVertexLocation,
@@ -177,7 +178,7 @@ public:
      */
     void drawIndexed(
         GraphicsState* pState,
-        GraphicsVars* pVars,
+        ProgramVars* pVars,
         uint32_t indexCount,
         uint32_t startIndexLocation,
         int32_t baseVertexLocation
@@ -193,7 +194,7 @@ public:
      */
     void drawIndexedInstanced(
         GraphicsState* pState,
-        GraphicsVars* pVars,
+        ProgramVars* pVars,
         uint32_t indexCount,
         uint32_t instanceCount,
         uint32_t startIndexLocation,
@@ -213,7 +214,7 @@ public:
      */
     void drawIndirect(
         GraphicsState* pState,
-        GraphicsVars* pVars,
+        ProgramVars* pVars,
         uint32_t maxCommandCount,
         const Buffer* pArgBuffer,
         uint64_t argBufferOffset,
@@ -233,7 +234,7 @@ public:
      */
     void drawIndexedIndirect(
         GraphicsState* pState,
-        GraphicsVars* pVars,
+        ProgramVars* pVars,
         uint32_t maxCommandCount,
         const Buffer* pArgBuffer,
         uint64_t argBufferOffset,
@@ -251,11 +252,11 @@ public:
      * @param[in] dstRect Target rectangle to blit to, specified by [left, up, right, down].
      */
     void blit(
-        const ShaderResourceView::SharedPtr& pSrc,
-        const RenderTargetView::SharedPtr& pDst,
+        const ref<ShaderResourceView>& pSrc,
+        const ref<RenderTargetView>& pDst,
         uint4 srcRect = kMaxRect,
         uint4 dstRect = kMaxRect,
-        Sampler::Filter = Sampler::Filter::Linear
+        TextureFilteringMode = TextureFilteringMode::Linear
     );
 
     /**
@@ -271,19 +272,19 @@ public:
      * @param[in] componentsTransform Linear combination factors of the input components for each output component.
      */
     void blit(
-        const ShaderResourceView::SharedPtr& pSrc,
-        const RenderTargetView::SharedPtr& pDst,
+        const ref<ShaderResourceView>& pSrc,
+        const ref<RenderTargetView>& pDst,
         uint4 srcRect,
         uint4 dstRect,
-        Sampler::Filter filter,
-        const Sampler::ReductionMode componentsReduction[4],
+        TextureFilteringMode filter,
+        const TextureReductionMode componentsReduction[4],
         const float4 componentsTransform[4]
     );
 
     /**
      * Submit the command list
      */
-    void flush(bool wait = false) override;
+    void submit(bool wait = false) override;
 
     /**
      * Tell the render context what it should and shouldn't bind before drawing
@@ -299,23 +300,18 @@ public:
      * Resolve an entire multi-sampled resource. The dst and src resources must have the same dimensions, array-size, mip-count and format.
      * If any of these properties don't match, you'll have to use `resolveSubresource`
      */
-    void resolveResource(const Texture::SharedPtr& pSrc, const Texture::SharedPtr& pDst);
+    void resolveResource(const ref<Texture>& pSrc, const ref<Texture>& pDst);
 
     /**
      * Resolve a multi-sampled sub-resource
      */
-    void resolveSubresource(
-        const Texture::SharedPtr& pSrc,
-        uint32_t srcSubresource,
-        const Texture::SharedPtr& pDst,
-        uint32_t dstSubresource
-    );
+    void resolveSubresource(const ref<Texture>& pSrc, uint32_t srcSubresource, const ref<Texture>& pDst, uint32_t dstSubresource);
 
     /**
      * Submit a raytrace command. This function doesn't change the state of the render-context. Graphics/compute vars and state will stay
      * the same.
      */
-    void raytrace(RtProgram* pProgram, RtProgramVars* pVars, uint32_t width, uint32_t height, uint32_t depth);
+    void raytrace(Program* pProgram, RtProgramVars* pVars, uint32_t width, uint32_t height, uint32_t depth);
 
     /**
      * Build an acceleration structure.
@@ -334,10 +330,13 @@ public:
 private:
     RenderContext(gfx::ICommandQueue* pQueue);
 
+    gfx::IRenderCommandEncoder* drawCallCommon(GraphicsState* pState, ProgramVars* pVars);
+
     std::unique_ptr<BlitContext> mpBlitContext;
 
     StateBindFlags mBindFlags = StateBindFlags::All;
-    GraphicsVars* mpLastBoundGraphicsVars = nullptr;
+    GraphicsStateObject* mpLastBoundGraphicsStateObject = nullptr;
+    ProgramVars* mpLastBoundGraphicsVars = nullptr;
 };
 
 FALCOR_ENUM_CLASS_OPERATORS(RenderContext::StateBindFlags);

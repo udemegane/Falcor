@@ -2,36 +2,48 @@ add_falcor_executable(FalcorTest)
 
 target_sources(FalcorTest PRIVATE
     FalcorTest.cpp
-    FalcorTest.h
 
+    Tests/Core/AftermathTests.cpp
+    Tests/Core/AftermathTests.cs.slang
+    Tests/Core/AssetResolverTests.cpp
+    Tests/Core/BlitTests.cpp
+    Tests/Core/BlitTests.cs.slang
     Tests/Core/BufferAccessTests.cpp
-    Tests/Core/BufferAccessTests.cs.slang
     Tests/Core/BufferTests.cpp
     Tests/Core/BufferTests.cs.slang
     Tests/Core/ConstantBufferTests.cpp
     Tests/Core/ConstantBufferTests.cs.slang
+    Tests/Core/CoreTests.cpp
     Tests/Core/DDSReadTests.cpp
     Tests/Core/DDSReadTests.cs.slang
-    Tests/Core/ResourceAliasing.cpp
-    Tests/Core/ResourceAliasing.cs.slang
+    Tests/Core/EnumTests.cpp
     Tests/Core/LargeBuffer.cpp
     Tests/Core/LargeBuffer.cs.slang
+    Tests/Core/ObjectTests.cpp
     Tests/Core/ParamBlockCB.cpp
     Tests/Core/ParamBlockCB.cs.slang
     Tests/Core/ParamBlockDefinition.slang
     Tests/Core/ParamBlockReflection.cs.slang
     Tests/Core/PluginTests.cpp
+    Tests/Core/ResourceAliasing.cpp
+    Tests/Core/ResourceAliasing.cs.slang
     Tests/Core/RootBufferParamBlockTests.cpp
     Tests/Core/RootBufferParamBlockTests.cs.slang
     Tests/Core/RootBufferStructTests.cpp
     Tests/Core/RootBufferStructTests.cs.slang
     Tests/Core/RootBufferTests.cpp
     Tests/Core/RootBufferTests.cs.slang
+    Tests/Core/TextureLoadTests.cs.slang
     Tests/Core/TextureTests.cpp
     Tests/Core/TextureTests.cs.slang
-    Tests/Core/TextureLoadTests.cs.slang
 
     Tests/DebugPasses/InvalidPixelDetectionTests.cpp
+
+    Tests/DiffRendering/SceneGradientsTest.cpp
+    Tests/DiffRendering/SceneGradientsTest.cs.slang
+
+    Tests/DiffRendering/Material/DiffMaterialTests.cpp
+    Tests/DiffRendering/Material/DiffMaterialTests.cs.slang
 
     Tests/Platform/LockFileTests.cpp
     Tests/Platform/MemoryMappedFileTests.cpp
@@ -85,6 +97,8 @@ target_sources(FalcorTest PRIVATE
     Tests/Slang/ShaderStringInline.cs.slang
     Tests/Slang/ShaderStringModule.cs.slang
     Tests/Slang/ShaderStringUtil.slang
+    Tests/Slang/SlangExtension.cpp
+    Tests/Slang/SlangExtension.cs.slang
     Tests/Slang/SlangInheritance.cpp
     Tests/Slang/SlangInheritance.cs.slang
     Tests/Slang/SlangMutatingTests.cpp
@@ -116,6 +130,7 @@ target_sources(FalcorTest PRIVATE
     Tests/Utils/Debug/WarpProfilerTests.cs.slang
 
     Tests/Utils/Image/BitmapTests.cpp
+    Tests/Utils/Image/TextureManagerTests.cpp
 
     Tests/Utils/AABBTests.cpp
     Tests/Utils/AABBTests.cs.slang
@@ -144,6 +159,8 @@ target_sources(FalcorTest PRIVATE
     Tests/Utils/ParallelReductionTests.cpp
     Tests/Utils/PathResolvingTests.cpp
     Tests/Utils/PrefixSumTests.cpp
+    Tests/Utils/PropertiesTests.cpp
+    Tests/Utils/QuaternionTests.cpp
     Tests/Utils/RectangleTests.cpp
     Tests/Utils/SettingsTests.cpp
     Tests/Utils/StringUtilsTests.cpp

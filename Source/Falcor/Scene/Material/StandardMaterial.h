@@ -67,22 +67,22 @@ namespace Falcor
     */
     class FALCOR_API StandardMaterial : public BasicMaterial
     {
+        FALCOR_OBJECT(StandardMaterial)
     public:
-        using SharedPtr = std::shared_ptr<StandardMaterial>;
+        static ref<StandardMaterial> create(ref<Device> pDevice, const std::string& name = "", ShadingModel shadingModel = ShadingModel::MetalRough)
+        {
+            return make_ref<StandardMaterial>(pDevice, name, shadingModel);
+        }
 
-        /** Create a new standard material.
-            \param[in] name The material name.
-            \param[in] model Shading model.
-        */
-        static SharedPtr create(std::shared_ptr<Device> pDevice, const std::string& name = "", ShadingModel shadingModel = ShadingModel::MetalRough);
+        StandardMaterial(ref<Device> pDevice, const std::string& name, ShadingModel shadingModel);
 
         /** Render the UI.
             \return True if the material was modified.
         */
         bool renderUI(Gui::Widgets& widget) override;
 
-        Program::ShaderModuleList getShaderModules() const override;
-        Program::TypeConformanceList getTypeConformances() const override;
+        ProgramDesc::ShaderModuleList getShaderModules() const override;
+        TypeConformanceList getTypeConformances() const override;
 
         /** Get the shading model.
         */
@@ -130,9 +130,17 @@ namespace Falcor
             mHeader.setEnableLightProfile( enabled );
         }
 
-    protected:
-        StandardMaterial(std::shared_ptr<Device> pDevice, const std::string& name, ShadingModel shadingModel);
+        void setHasEntryPointVolumeProperties(bool hasEntryPointVolumeProperties);
 
+        bool getHasEntryPointVolumeProperties() const;
+
+        DefineList getDefines() const override;
+
+        const MaterialParamLayout& getParamLayout() const override;
+        SerializedMaterialParams serializeParams() const override;
+        void deserializeParams(const SerializedMaterialParams& params) override;
+
+    protected:
         void updateDeltaSpecularFlag() override;
 
         void renderSpecularUI(Gui::Widgets& widget) override;

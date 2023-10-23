@@ -27,7 +27,7 @@
  **************************************************************************/
 #include "PBRTDielectricMaterial.h"
 #include "Utils/Scripting/ScriptBindings.h"
-#include "Scene/SceneBuilderAccess.h"
+#include "GlobalState.h"
 
 namespace Falcor
 {
@@ -36,25 +36,20 @@ namespace Falcor
         const char kShaderFile[] = "Rendering/Materials/PBRT/PBRTDielectricMaterial.slang";
     }
 
-    PBRTDielectricMaterial::SharedPtr PBRTDielectricMaterial::create(std::shared_ptr<Device> pDevice, const std::string& name)
-    {
-        return SharedPtr(new PBRTDielectricMaterial(std::move(pDevice), name));
-    }
-
-    PBRTDielectricMaterial::PBRTDielectricMaterial(std::shared_ptr<Device> pDevice, const std::string& name)
-        : BasicMaterial(std::move(pDevice), name, MaterialType::PBRTDielectric)
+    PBRTDielectricMaterial::PBRTDielectricMaterial(ref<Device> pDevice, const std::string& name)
+        : BasicMaterial(pDevice, name, MaterialType::PBRTDielectric)
     {
         // Setup additional texture slots.
         mTextureSlotInfo[(uint32_t)TextureSlot::Specular] = { "specular", TextureChannelFlags::Red | TextureChannelFlags::Green, false };
         mTextureSlotInfo[(uint32_t)TextureSlot::Normal] = { "normal", TextureChannelFlags::RGB, false };
     }
 
-    Program::ShaderModuleList PBRTDielectricMaterial::getShaderModules() const
+    ProgramDesc::ShaderModuleList PBRTDielectricMaterial::getShaderModules() const
     {
-        return { Program::ShaderModule(kShaderFile) };
+        return { ProgramDesc::ShaderModule::fromFile(kShaderFile) };
     }
 
-    Program::TypeConformanceList PBRTDielectricMaterial::getTypeConformances() const
+    TypeConformanceList PBRTDielectricMaterial::getTypeConformances() const
     {
         return { {{"PBRTDielectricMaterial", "IMaterial"}, (uint32_t)MaterialType::PBRTDielectric} };
     }
@@ -82,10 +77,10 @@ namespace Falcor
 
         FALCOR_SCRIPT_BINDING_DEPENDENCY(BasicMaterial)
 
-        pybind11::class_<PBRTDielectricMaterial, BasicMaterial, PBRTDielectricMaterial::SharedPtr> material(m, "PBRTDielectricMaterial");
+        pybind11::class_<PBRTDielectricMaterial, BasicMaterial, ref<PBRTDielectricMaterial>> material(m, "PBRTDielectricMaterial");
         auto create = [] (const std::string& name)
         {
-            return PBRTDielectricMaterial::create(getActivePythonSceneBuilder().getDevice(), name);
+            return PBRTDielectricMaterial::create(accessActivePythonSceneBuilder().getDevice(), name);
         };
         material.def(pybind11::init(create), "name"_a = ""); // PYTHONDEPRECATED
 

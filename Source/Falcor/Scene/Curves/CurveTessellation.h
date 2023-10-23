@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -29,6 +29,7 @@
 #include "Core/Macros.h"
 #include "Utils/Math/Matrix.h"
 #include "Utils/Math/Vector.h"
+#include "Utils/fast_vector.h"
 #include <vector>
 
 namespace Falcor
@@ -41,10 +42,10 @@ namespace Falcor
         struct SweptSphereResult
         {
             uint32_t degree;
-            std::vector<uint32_t> indices;
-            std::vector<float3> points;
-            std::vector<float> radius;
-            std::vector<float2> texCrds;
+            fast_vector<uint32_t> indices;
+            fast_vector<float3> points;
+            fast_vector<float> radius;
+            fast_vector<float2> texCrds;
         };
 
         /** Convert cubic B-splines to a couple of linear swept sphere segments.
@@ -61,19 +62,19 @@ namespace Falcor
             \param[in] xform Row-major 4x4 transformation matrix. We apply pre-transformation to curve geometry.
             \return Linear swept sphere segments.
         */
-        static SweptSphereResult convertToLinearSweptSphere(uint32_t strandCount, const uint32_t* vertexCountsPerStrand, const float3* controlPoints, const float* widths, const float2* UVs, uint32_t degree, uint32_t subdivPerSegment, uint32_t keepOneEveryXStrands, uint32_t keepOneEveryXVerticesPerStrand, float widthScale, const rmcv::mat4& xform);
+        static SweptSphereResult convertToLinearSweptSphere(uint32_t strandCount, const uint32_t* vertexCountsPerStrand, const float3* controlPoints, const float* widths, const float2* UVs, uint32_t degree, uint32_t subdivPerSegment, uint32_t keepOneEveryXStrands, uint32_t keepOneEveryXVerticesPerStrand, float widthScale, const float4x4& xform);
 
         // Tessellated mesh
 
         struct MeshResult
         {
-            std::vector<float3> vertices;
-            std::vector<float3> normals;
-            std::vector<float4> tangents;
-            std::vector<float2> texCrds;
-            std::vector<float> radii;
-            std::vector<uint32_t> faceVertexCounts;
-            std::vector<uint32_t> faceVertexIndices;
+            fast_vector<float3> vertices;
+            fast_vector<float3> normals;
+            fast_vector<float4> tangents;
+            fast_vector<float2> texCrds;
+            fast_vector<float> radii;
+            fast_vector<uint32_t> faceVertexCounts;
+            fast_vector<uint32_t> faceVertexIndices;
         };
 
         /** Tessellate cubic B-splines to a triangular mesh.

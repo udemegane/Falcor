@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -43,10 +43,7 @@ struct xform4x4
 {
     row_major float4x4 xform;
 
-    __init(float4x4 m)
-    {
-        xform = m;
-    }
+    __init(float4x4 m) { xform = m; }
 }
 
 // Affine transform
@@ -54,23 +51,18 @@ struct xform3x4
 {
     row_major float3x4 xform;
 
-    __init(float3x4 m)
-    {
-        xform = m;
-    }
+    __init(float3x4 m) { xform = m; }
 
-    __init(float4x4 m)
-    {
-        xform = float3x4(m[0], m[1], m[2]);
-    }
+    __init(float4x4 m) { xform = float3x4(m[0], m[1], m[2]); }
 }
 
 xform3x4 concat(xform3x4 aFromB, xform3x4 bFromC)
 {
     xform3x4 aFromC;
     aFromC.xform = (float3x4)mul(
-        float4x4(aFromB.xform[0], aFromB.xform[1], aFromB.xform[2], float4(0,0,0,1)),
-        float4x4(bFromC.xform[0],bFromC.xform[1],bFromC.xform[2],float4(0,0,0,1)));
+        float4x4(aFromB.xform[0], aFromB.xform[1], aFromB.xform[2], float4(0, 0, 0, 1)),
+        float4x4(bFromC.xform[0], bFromC.xform[1], bFromC.xform[2], float4(0, 0, 0, 1))
+    );
     return aFromC;
 }
 
@@ -99,4 +91,17 @@ float3 transformVector(xform4x4 aFromB, float3 vectorB)
 float3 transformVector(xform3x4 aFromB, float3 vectorB)
 {
     return mul(aFromB.xform, float4(vectorB, 0.f)).xyz;
+}
+
+__generic<T : __BuiltinFloatingPointType, let N : int> extension matrix<T, N, N>
+{
+    // Create an identity matrix of size N and type T
+    static matrix<T, N, N> identity()
+    {
+        static matrix<T, N, N> m = matrix<T, N, N>((T)0);
+        [ForceUnroll]
+        for (int i = 0; i < N; i++)
+            m[i][i] = (T)1;
+        return m;
+    }
 }

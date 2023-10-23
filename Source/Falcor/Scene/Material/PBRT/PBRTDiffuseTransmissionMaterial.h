@@ -51,18 +51,13 @@ namespace Falcor
     */
     class FALCOR_API PBRTDiffuseTransmissionMaterial : public BasicMaterial
     {
+        FALCOR_OBJECT(PBRTDiffuseTransmissionMaterial)
     public:
-        using SharedPtr = std::shared_ptr<PBRTDiffuseTransmissionMaterial>;
+        static ref<PBRTDiffuseTransmissionMaterial> create(ref<Device> pDevice, const std::string& name) { return make_ref<PBRTDiffuseTransmissionMaterial>(pDevice, name); }
 
-        /** Create a new PBRTDiffuseTransmission material.
-            \param[in] name The material name.
-        */
-        static SharedPtr create(std::shared_ptr<Device> pDevice, const std::string& name = "");
+        PBRTDiffuseTransmissionMaterial(ref<Device> pDevice, const std::string& name);
 
-        Program::ShaderModuleList getShaderModules() const override;
-        Program::TypeConformanceList getTypeConformances() const override;
-
-    protected:
-        PBRTDiffuseTransmissionMaterial(std::shared_ptr<Device> pDevice, const std::string& name);
+        ProgramDesc::ShaderModuleList getShaderModules() const override;
+        TypeConformanceList getTypeConformances() const override;
     };
 }

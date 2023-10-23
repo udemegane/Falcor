@@ -30,13 +30,14 @@
 #include "Texture.h"
 #include "Formats.h"
 #include "Core/Macros.h"
+#include "Core/Object.h"
 #include <slang-gfx.h>
-#include <memory>
 
 namespace Falcor
 {
-class FALCOR_API Swapchain
+class FALCOR_API Swapchain : public Object
 {
+    FALCOR_OBJECT(Swapchain)
 public:
     struct Desc
     {
@@ -52,12 +53,12 @@ public:
      * @param desc Swapchain description.
      * @param windowHandle Handle of window to create swapchain for.
      */
-    Swapchain(std::shared_ptr<Device> pDevice, const Desc& desc, WindowHandle windowHandle);
+    Swapchain(ref<Device> pDevice, const Desc& desc, WindowHandle windowHandle);
 
     const Desc& getDesc() const { return mDesc; }
 
     /// Returns the back buffer image at `index`.
-    const Texture::SharedPtr& getImage(uint32_t index) const;
+    const ref<Texture>& getImage(uint32_t index) const;
 
     /// Present the next image in the swapchain.
     void present();
@@ -68,7 +69,7 @@ public:
 
     /// Resizes the back buffers of this swapchain. All render target views and framebuffers
     /// referencing the back buffer images must be freed before calling this method.
-    /// Note: This method calls Device::flushAndSync().
+    /// Note: This method calls Device::wait().
     void resize(uint32_t width, uint32_t height);
 
     /// Check if the window is occluded.
@@ -80,13 +81,11 @@ public:
     gfx::ISwapchain* getGfxSwapchain() const { return mGfxSwapchain; }
 
 private:
-    Swapchain(const Desc& desc, WindowHandle windowHandle);
-
     void prepareImages();
 
-    std::shared_ptr<Device> mpDevice;
+    ref<Device> mpDevice;
     Desc mDesc;
     Slang::ComPtr<gfx::ISwapchain> mGfxSwapchain;
-    std::vector<Texture::SharedPtr> mImages;
+    std::vector<ref<Texture>> mImages;
 };
 } // namespace Falcor

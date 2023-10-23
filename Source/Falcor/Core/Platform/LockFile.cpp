@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -31,6 +31,7 @@
 #define WINDOWS_LEAN_AND_MEAN
 #include <windows.h>
 #elif FALCOR_LINUX
+#include <unistd.h>
 #include <sys/types.h>
 #include <sys/file.h>
 #else
@@ -54,8 +55,13 @@ bool LockFile::open(const std::filesystem::path& path)
 {
 #if FALCOR_WINDOWS
     mFileHandle = ::CreateFileW(
-        path.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, CREATE_ALWAYS,
-        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, NULL
+        path.c_str(),
+        GENERIC_READ | GENERIC_WRITE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        NULL,
+        CREATE_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED,
+        NULL
     );
     mIsOpen = mFileHandle != INVALID_HANDLE_VALUE;
 #elif FALCOR_LINUX

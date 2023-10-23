@@ -27,7 +27,7 @@
  **************************************************************************/
 #include "PythonImporter.h"
 #include "Scene/Importer.h"
-#include "Scene/SceneBuilderAccess.h"
+#include "GlobalState.h"
 #include "Utils/Scripting/Scripting.h"
 #include <filesystem>
 #include <regex>
@@ -60,8 +60,8 @@ static std::optional<std::string> parseLegacyHeader(const std::string& script)
 
 /// Set of currently imported paths, used to avoid recursion. TODO: REMOVEGLOBAL
 static std::set<std::filesystem::path> sImportPaths;
-/// Stack of import directories to properly handle adding/removing data search paths. TODO: REMOVEGLOBAL
-static std::vector<std::filesystem::path> sImportDirectories;
+/// Keeps track of how many recursive importers are in process. TODO: REMOVEGLOBAL
+static size_t sImportDepth;
 
 /**
  * This class is used to handle nested imports through RAII.
@@ -72,35 +72,41 @@ static std::vector<std::filesystem::path> sImportDirectories;
 class ScopedImport
 {
 public:
-    ScopedImport(const std::filesystem::path& path, Settings& settings)
-        : mScopedSettings(settings), mPath(path), mDirectory(path.parent_path())
+    ScopedImport(SceneBuilder& builder, const std::filesystem::path& path) : mBuilder(builder), mPath(path)
     {
-        FALCOR_ASSERT(path.is_absolute());
-        sImportPaths.emplace(mPath);
-        sImportDirectories.push_back(mDirectory);
+        if (!path.empty())
+        {
+            FALCOR_ASSERT(path.is_absolute());
+            sImportPaths.emplace(mPath);
 
-        // Add directory to search directories (add it to the front to make it highest priority).
-        addDataDirectory(mDirectory, true);
+            // Add base directory to search paths.
+            mBuilder.pushAssetResolver();
+            mBuilder.getAssetResolver().addSearchPath(path.parent_path(), SearchPathPriority::First);
+        }
+
+        // Set global scene builder as workaround to support old Python API.
+        setActivePythonSceneBuilder(&mBuilder);
+        sImportDepth++;
     }
     ~ScopedImport()
     {
-        auto erased = sImportPaths.erase(mPath);
-        FALCOR_ASSERT(erased == 1);
-
-        FALCOR_ASSERT(sImportDirectories.size() > 0);
-        sImportDirectories.pop_back();
-
-        // Remove script directory from search path (only if not needed by the outer importer).
-        if (std::find(sImportDirectories.begin(), sImportDirectories.end(), mDirectory) == sImportDirectories.end())
+        if (!mPath.empty())
         {
-            removeDataDirectory(mDirectory);
+            auto erased = sImportPaths.erase(mPath);
+            FALCOR_ASSERT(erased == 1);
+
+            mBuilder.popAssetResolver();
         }
+
+        // Unset global scene builder.
+        FALCOR_ASSERT(sImportDepth > 0);
+        if (--sImportDepth == 0)
+            setActivePythonSceneBuilder(nullptr);
     }
 
 private:
-    ScopedSettings mScopedSettings;
+    SceneBuilder& mBuilder;
     std::filesystem::path mPath;
-    std::filesystem::path mDirectory;
 };
 
 static bool isRecursiveImport(const std::filesystem::path& path)
@@ -115,7 +121,11 @@ std::unique_ptr<Importer> PythonImporter::create()
     return std::make_unique<PythonImporter>();
 }
 
-void PythonImporter::importScene(const std::filesystem::path& path, SceneBuilder& builder, const Dictionary& dict)
+void PythonImporter::importScene(
+    const std::filesystem::path& path,
+    SceneBuilder& builder,
+    const std::map<std::string, std::string>& materialToShortName
+)
 {
     if (!path.is_absolute())
         throw ImporterError(path, "Expected absolute path.");
@@ -126,13 +136,35 @@ void PythonImporter::importScene(const std::filesystem::path& path, SceneBuilder
     // Load the script file
     const std::string script = readFile(path);
 
+    importInternal(script, path, builder);
+}
+
+void PythonImporter::importSceneFromMemory(
+    const void* buffer,
+    size_t byteSize,
+    std::string_view extension,
+    SceneBuilder& builder,
+    const std::map<std::string, std::string>& materialToShortName
+)
+{
+    FALCOR_CHECK(extension == "pyscene", "Unexpected format.");
+    FALCOR_CHECK(buffer != nullptr, "Missing buffer.");
+    FALCOR_CHECK(byteSize > 0, "Empty buffer.");
+
+    const std::string script(static_cast<const char*>(buffer), byteSize);
+
+    importInternal(script, {}, builder);
+}
+
+void PythonImporter::importInternal(const std::string& script, const std::filesystem::path& path, SceneBuilder& builder)
+{
     // Check for legacy .pyscene file format.
     if (auto sceneFile = parseLegacyHeader(script))
-        throw ImporterError(path, "Python scene file is using old header comment syntax. Use the new 'sceneBuilder' object instead.");
+        throw ImporterError(path, "Python scene is using old header comment syntax. Use the new 'sceneBuilder' object instead.");
 
     // Keep track of this import and add script directory to data search directories.
     // We use RAII here to make sure the scope is properly removed when throwing an exception.
-    ScopedImport scopedImport(path, builder.getSettings());
+    ScopedImport scopedImport(builder, path);
 
     // Execute script.
     try
@@ -140,9 +172,10 @@ void PythonImporter::importScene(const std::filesystem::path& path, SceneBuilder
         Scripting::Context context;
         context.setObject("sceneBuilder", &builder);
         Scripting::runScript("from falcor import *", context);
-        setActivePythonSceneBuilder(&builder);
-        Scripting::runScriptFromFile(path, context);
-        setActivePythonSceneBuilder(nullptr);
+        if (path.empty())
+            Scripting::runScript(script, context);
+        else
+            Scripting::runScriptFromFile(path, context);
     }
     catch (const std::exception& e)
     {

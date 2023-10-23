@@ -46,26 +46,25 @@ std::vector<uint16_t> generateData(const size_t n)
 
 void test(GPUUnitTestContext& ctx, const std::string& entryPoint, const size_t n)
 {
-    Device* pDevice = ctx.getDevice().get();
+    ref<Device> pDevice = ctx.getDevice();
 
     std::vector<uint16_t> elems = generateData(n);
 
-    ctx.createProgram("Tests/Slang/TemplatedLoad.cs.slang", entryPoint, Program::DefineList(), Shader::CompilerFlags::None, "6_5");
+    ctx.createProgram("Tests/Slang/TemplatedLoad.cs.slang", entryPoint, DefineList(), SlangCompilerFlags::None, ShaderModel::SM6_5);
     ctx.allocateStructuredBuffer("result", (uint32_t)elems.size());
 
     auto var = ctx.vars().getRootVar();
     var["data"] =
-        Buffer::create(pDevice, elems.size() * sizeof(elems[0]), ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, elems.data());
+        pDevice->createBuffer(elems.size() * sizeof(elems[0]), ResourceBindFlags::ShaderResource, MemoryType::DeviceLocal, elems.data());
 
     ctx.runProgram(1, 1, 1);
 
     // Verify results.
-    const uint16_t* result = ctx.mapBuffer<const uint16_t>("result");
+    std::vector<uint16_t> result = ctx.readBuffer<uint16_t>("result");
     for (size_t i = 0; i < elems.size(); i++)
     {
         EXPECT_EQ(result[i], elems[i]) << "i = " << i;
     }
-    ctx.unmapBuffer("result");
 }
 } // namespace
 

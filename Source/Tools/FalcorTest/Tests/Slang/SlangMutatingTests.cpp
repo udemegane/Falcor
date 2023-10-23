@@ -31,19 +31,18 @@ namespace Falcor
 {
 GPU_TEST(SlangMutating)
 {
-    Device* pDevice = ctx.getDevice().get();
+    ref<Device> pDevice = ctx.getDevice();
 
-    ctx.createProgram("Tests/Slang/SlangMutatingTests.cs.slang", "main", Program::DefineList(), Shader::CompilerFlags::None, "6_3");
+    ctx.createProgram("Tests/Slang/SlangMutatingTests.cs.slang", "main", DefineList(), SlangCompilerFlags::None, ShaderModel::SM6_3);
     ctx.allocateStructuredBuffer("result", 1);
 
     ShaderVar var = ctx.vars().getRootVar();
     uint4 v = {11, 22, 33, 44};
-    var["buffer"] = Buffer::createTyped<uint4>(pDevice, 1, ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, &v);
+    var["buffer"] = pDevice->createTypedBuffer<uint4>(1, ResourceBindFlags::ShaderResource, MemoryType::DeviceLocal, &v);
 
     ctx.runProgram();
 
-    const uint32_t* result = ctx.mapBuffer<const uint32_t>("result");
+    std::vector<uint32_t> result = ctx.readBuffer<uint32_t>("result");
     EXPECT_EQ(result[0], 33);
-    ctx.unmapBuffer("result");
 }
 } // namespace Falcor

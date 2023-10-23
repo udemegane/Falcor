@@ -25,6 +25,7 @@
  # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
+#include "Core/Plugin.h"
 #include "Testing/UnitTest.h"
 #include "RenderGraph/RenderGraph.h"
 
@@ -32,7 +33,9 @@ namespace Falcor
 {
 GPU_TEST(InvalidPixelDetectionPass)
 {
-    Device* pDevice = ctx.getDevice().get();
+    PluginManager::instance().loadPluginByName("DebugPasses");
+
+    ref<Device> pDevice = ctx.getDevice();
 
     float pInitData[8] = {
         std::numeric_limits<float>::quiet_NaN(),
@@ -46,18 +49,18 @@ GPU_TEST(InvalidPixelDetectionPass)
     };
 
     RenderContext* pRenderContext = ctx.getRenderContext();
-    Fbo* pTargetFbo = ctx.getTargetFbo();
-    Texture::SharedPtr pInput = Texture::create2D(pDevice, 2, 4, ResourceFormat::R32Float, 1, Resource::kMaxPossible, pInitData);
-    RenderGraph::SharedPtr pGraph = RenderGraph::create(ctx.getDevice(), "Invalid Pixel Detection");
-    RenderPass::SharedPtr pPass = RenderPass::create("InvalidPixelDetectionPass", ctx.getDevice());
+    ref<Fbo> pTargetFbo = Fbo::create2D(pDevice, 2, 4, ResourceFormat::BGRA8UnormSrgb);
+    ref<Texture> pInput = pDevice->createTexture2D(2, 4, ResourceFormat::R32Float, 1, Resource::kMaxPossible, pInitData);
+    ref<RenderGraph> pGraph = RenderGraph::create(ctx.getDevice(), "Invalid Pixel Detection");
+    ref<RenderPass> pPass = RenderPass::create("InvalidPixelDetectionPass", ctx.getDevice());
     if (!pPass)
-        throw RuntimeError("Could not create render pass 'InvalidPixelDetectionPass'");
+        FALCOR_THROW("Could not create render pass 'InvalidPixelDetectionPass'");
     pGraph->addPass(pPass, "InvalidPixelDetectionPass");
     pGraph->setInput("InvalidPixelDetectionPass.src", pInput);
     pGraph->markOutput("InvalidPixelDetectionPass.dst");
-    pGraph->onResize(pTargetFbo);
+    pGraph->onResize(pTargetFbo.get());
     pGraph->execute(pRenderContext);
-    Resource::SharedPtr pOutput = pGraph->getOutput("InvalidPixelDetectionPass.dst");
+    ref<Resource> pOutput = pGraph->getOutput("InvalidPixelDetectionPass.dst");
     std::vector<uint8_t> color = pRenderContext->readTextureSubresource(pOutput->asTexture().get(), 0);
     uint32_t* output = (uint32_t*)color.data();
 

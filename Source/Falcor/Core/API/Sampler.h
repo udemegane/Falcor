@@ -27,99 +27,127 @@
  **************************************************************************/
 #pragma once
 #include "fwd.h"
-#include "Common.h"
+#include "Types.h"
 #include "Handles.h"
 #include "NativeHandle.h"
 #include "Core/Macros.h"
+#include "Core/Object.h"
+#include "Core/Enum.h"
 #include "Utils/Math/Vector.h"
-#include <memory>
 
 namespace Falcor
 {
+
+/**
+ * Texture filtering modes.
+ */
+enum class TextureFilteringMode
+{
+    Point,
+    Linear,
+};
+
+FALCOR_ENUM_INFO(
+    TextureFilteringMode,
+    {
+        {TextureFilteringMode::Point, "Point"},
+        {TextureFilteringMode::Linear, "Linear"},
+    }
+);
+FALCOR_ENUM_REGISTER(TextureFilteringMode);
+
+/**
+ * Addressing mode in case the texture coordinates are out of [0, 1] range.
+ */
+enum class TextureAddressingMode
+{
+    Wrap,      ///< Wrap around
+    Mirror,    ///< Wrap around and mirror on every integer junction
+    Clamp,     ///< Clamp the normalized coordinates to [0, 1]
+    Border,    ///< If out-of-bound, use the sampler's border color
+    MirrorOnce ///< Same as Mirror, but mirrors only once around 0
+};
+
+FALCOR_ENUM_INFO(
+    TextureAddressingMode,
+    {
+        {TextureAddressingMode::Wrap, "Wrap"},
+        {TextureAddressingMode::Mirror, "Mirror"},
+        {TextureAddressingMode::Clamp, "Clamp"},
+        {TextureAddressingMode::Border, "Border"},
+        {TextureAddressingMode::MirrorOnce, "MirrorOnce"},
+    }
+);
+FALCOR_ENUM_REGISTER(TextureAddressingMode);
+
+/**
+ * Reduction modes.
+ */
+enum class TextureReductionMode
+{
+    Standard,
+    Comparison,
+    Min,
+    Max,
+};
+
+FALCOR_ENUM_INFO(
+    TextureReductionMode,
+    {
+        {TextureReductionMode::Standard, "Standard"},
+        {TextureReductionMode::Comparison, "Comparison"},
+        {TextureReductionMode::Min, "Min"},
+        {TextureReductionMode::Max, "Max"},
+    }
+);
+FALCOR_ENUM_REGISTER(TextureReductionMode);
+
 /**
  * Abstract the API sampler state object
  */
-class FALCOR_API Sampler
+class FALCOR_API Sampler : public Object
 {
+    FALCOR_OBJECT(Sampler)
 public:
-    using SharedPtr = std::shared_ptr<Sampler>;
-
-    /**
-     * Filter mode
-     */
-    enum class Filter
-    {
-        Point,
-        Linear,
-    };
-
-    /**
-     * Addressing mode in case the texture coordinates are out of [0, 1] range
-     */
-    enum class AddressMode
-    {
-        Wrap,      ///< Wrap around
-        Mirror,    ///< Wrap around and mirror on every integer junction
-        Clamp,     ///< Clamp the normalized coordinates to [0, 1]
-        Border,    ///< If out-of-bound, use the sampler's border color
-        MirrorOnce ///< Same as Mirror, but mirrors only once around 0
-    };
-
-    /**
-     * Reduction mode
-     */
-    enum class ReductionMode
-    {
-        Standard,
-        Comparison,
-        Min,
-        Max,
-    };
-
-    /**
-     * Comparison mode for the sampler.
-     */
-    using ComparisonMode = ComparisonFunc;
-
     /**
      * Descriptor used to create a new Sampler object
      */
     struct Desc
     {
-        Filter magFilter = Filter::Linear;
-        Filter minFilter = Filter::Linear;
-        Filter mipFilter = Filter::Linear;
+        TextureFilteringMode magFilter = TextureFilteringMode::Linear;
+        TextureFilteringMode minFilter = TextureFilteringMode::Linear;
+        TextureFilteringMode mipFilter = TextureFilteringMode::Linear;
         uint32_t maxAnisotropy = 1;
         float maxLod = 1000;
         float minLod = -1000;
         float lodBias = 0;
-        ComparisonMode comparisonMode = ComparisonMode::Disabled;
-        ReductionMode reductionMode = ReductionMode::Standard;
-        AddressMode addressModeU = AddressMode::Wrap;
-        AddressMode addressModeV = AddressMode::Wrap;
-        AddressMode addressModeW = AddressMode::Wrap;
+        ComparisonFunc comparisonFunc = ComparisonFunc::Disabled;
+        TextureReductionMode reductionMode = TextureReductionMode::Standard;
+        TextureAddressingMode addressModeU = TextureAddressingMode::Wrap;
+        TextureAddressingMode addressModeV = TextureAddressingMode::Wrap;
+        TextureAddressingMode addressModeW = TextureAddressingMode::Wrap;
         float4 borderColor = float4(0, 0, 0, 0);
 
         /**
          * Set the filter mode
-         * @param[in] minFilter Filter mode in case of minification.
-         * @param[in] magFilter Filter mode in case of magnification.
-         * @param[in] mipFilter Mip-level sampling mode
+         * @param[in] minFilter_ Filter mode in case of minification.
+         * @param[in] magFilter_ Filter mode in case of magnification.
+         * @param[in] mipFilter_ Mip-level sampling mode
          */
-        Desc& setFilterMode(Filter minFilter, Filter magFilter, Filter mipFilter)
+        Desc& setFilterMode(TextureFilteringMode minFilter_, TextureFilteringMode magFilter_, TextureFilteringMode mipFilter_)
         {
-            this->magFilter = magFilter;
-            this->minFilter = minFilter;
-            this->mipFilter = mipFilter;
+            magFilter = magFilter_;
+            minFilter = minFilter_;
+            mipFilter = mipFilter_;
             return *this;
         }
 
         /**
          * Set the maximum anisotropic filtering value. If MaxAnisotropy > 1, min/mag/mip filter modes are ignored
          */
-        Desc& setMaxAnisotropy(uint32_t maxAnisotropy)
+        Desc& setMaxAnisotropy(uint32_t maxAnisotropy_)
         {
-            this->maxAnisotropy = maxAnisotropy;
+            maxAnisotropy = maxAnisotropy_;
             return *this;
         }
 
@@ -129,29 +157,29 @@ public:
          * @param[in] maxLod Maximum LOD that will be used when sampling
          * @param[in] lodBias Bias to apply to the LOD
          */
-        Desc& setLodParams(float minLod, float maxLod, float lodBias)
+        Desc& setLodParams(float minLod_, float maxLod_, float lodBias_)
         {
-            this->minLod = minLod;
-            this->maxLod = maxLod;
-            this->lodBias = lodBias;
+            minLod = minLod_;
+            maxLod = maxLod_;
+            lodBias = lodBias_;
             return *this;
         }
 
         /**
-         * Set the sampler comparison mode.
+         * Set the sampler comparison function.
          */
-        Desc& setComparisonMode(ComparisonMode mode)
+        Desc& setComparisonFunc(ComparisonFunc func)
         {
-            this->comparisonMode = mode;
+            comparisonFunc = func;
             return *this;
         }
 
         /**
          * Set the sampler reduction mode.
          */
-        Desc& setReductionMode(ReductionMode mode)
+        Desc& setReductionMode(TextureReductionMode mode)
         {
-            this->reductionMode = mode;
+            reductionMode = mode;
             return *this;
         }
 
@@ -161,20 +189,20 @@ public:
          * @param[in] modeV Addressing mode for V texcoord channel
          * @param[in] modeW Addressing mode for W texcoord channel
          */
-        Desc& setAddressingMode(AddressMode modeU, AddressMode modeV, AddressMode modeW)
+        Desc& setAddressingMode(TextureAddressingMode modeU, TextureAddressingMode modeV, TextureAddressingMode modeW)
         {
-            this->addressModeU = modeU;
-            this->addressModeV = modeV;
-            this->addressModeW = modeW;
+            addressModeU = modeU;
+            addressModeV = modeV;
+            addressModeW = modeW;
             return *this;
         }
 
         /**
          * Set the border color. Only applies when the addressing mode is ClampToBorder
          */
-        Desc& setBorderColor(const float4& borderColor)
+        Desc& setBorderColor(const float4& borderColor_)
         {
-            this->borderColor = borderColor;
+            borderColor = borderColor_;
             return *this;
         }
 
@@ -185,8 +213,8 @@ public:
         {
             return magFilter == other.magFilter && minFilter == other.minFilter && mipFilter == other.mipFilter &&
                    maxAnisotropy == other.maxAnisotropy && maxLod == other.maxLod && minLod == other.minLod && lodBias == other.lodBias &&
-                   comparisonMode == other.comparisonMode && reductionMode == other.reductionMode && addressModeU == other.addressModeU &&
-                   addressModeV == other.addressModeV && addressModeW == other.addressModeW && borderColor == other.borderColor;
+                   comparisonFunc == other.comparisonFunc && reductionMode == other.reductionMode && addressModeU == other.addressModeU &&
+                   addressModeV == other.addressModeV && addressModeW == other.addressModeW && all(borderColor == other.borderColor);
         }
 
         /**
@@ -195,15 +223,8 @@ public:
         bool operator!=(const Desc& other) const { return !(*this == other); }
     };
 
-    Sampler(std::shared_ptr<Device> pDevice, const Desc& desc);
+    Sampler(ref<Device> pDevice, const Desc& desc);
     ~Sampler();
-
-    /**
-     * Create a new sampler object.
-     * @param[in] desc Describes sampler settings.
-     * @return A new object, or throws an exception if creation failed.
-     */
-    static SharedPtr create(Device* pDevice, const Desc& desc);
 
     /**
      * Get the sampler state.
@@ -220,17 +241,17 @@ public:
     /**
      * Get the magnification filter
      */
-    Filter getMagFilter() const { return mDesc.magFilter; }
+    TextureFilteringMode getMagFilter() const { return mDesc.magFilter; }
 
     /**
      * Get the minification filter
      */
-    Filter getMinFilter() const { return mDesc.minFilter; }
+    TextureFilteringMode getMinFilter() const { return mDesc.minFilter; }
 
     /**
      * Get the mip-levels filter
      */
-    Filter getMipFilter() const { return mDesc.mipFilter; }
+    TextureFilteringMode getMipFilter() const { return mDesc.mipFilter; }
 
     /**
      * Get the maximum anisotropy
@@ -253,29 +274,29 @@ public:
     float getLodBias() const { return mDesc.lodBias; }
 
     /**
-     * Get the comparison mode
+     * Get the comparison function
      */
-    ComparisonMode getComparisonMode() const { return mDesc.comparisonMode; }
+    ComparisonFunc getComparisonFunc() const { return mDesc.comparisonFunc; }
 
     /**
      * Get the reduction mode
      */
-    ReductionMode getReductionMode() const { return mDesc.reductionMode; }
+    TextureReductionMode getReductionMode() const { return mDesc.reductionMode; }
 
     /**
      * Get the addressing mode for the U texcoord
      */
-    AddressMode getAddressModeU() const { return mDesc.addressModeU; }
+    TextureAddressingMode getAddressModeU() const { return mDesc.addressModeU; }
 
     /**
      * Get the addressing mode for the V texcoord
      */
-    AddressMode getAddressModeV() const { return mDesc.addressModeV; }
+    TextureAddressingMode getAddressModeV() const { return mDesc.addressModeV; }
 
     /**
      * Get the addressing mode for the W texcoord
      */
-    AddressMode getAddressModeW() const { return mDesc.addressModeW; }
+    TextureAddressingMode getAddressModeW() const { return mDesc.addressModeW; }
 
     /**
      * Get the border color
@@ -287,10 +308,15 @@ public:
      */
     const Desc& getDesc() const { return mDesc; }
 
+    void breakStrongReferenceToDevice();
+
 private:
-    std::shared_ptr<Device> mpDevice;
+    BreakableReference<Device> mpDevice;
     Desc mDesc;
     Slang::ComPtr<gfx::ISamplerState> mGfxSamplerState;
     static uint32_t getApiMaxAnisotropy();
+
+    friend class Device;
 };
+
 } // namespace Falcor

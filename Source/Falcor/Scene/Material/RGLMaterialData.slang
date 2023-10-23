@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -40,7 +40,7 @@ BEGIN_NAMESPACE_FALCOR
 */
 struct RGLMaterialData
 {
-    // MaterialHeader (8B) is stored just before this struct in memory.
+    // MaterialHeader (16B) is stored just before this struct in memory.
     uint phiSize = 0;               ///< Number of angular sampling points.
     uint thetaSize = 0;
     uint2 sigmaSize = uint2(0);     ///< Size of sigma/NDF lookup tables. These are 2D.
@@ -62,9 +62,9 @@ struct RGLMaterialData
     TextureHandle texAlbedoLUT = {};///< Texture handle for albedo LUT.
 
     // Maximum resolution allowed for the various lookup tables.
-    static const uint kMaxResolution = 0xffff;
+    static constexpr uint kMaxResolution = 0xffff;
 
-    static const uint kAlbedoLUTSize = 256;
+    static constexpr uint kAlbedoLUTSize = 256;
 };
 
 END_NAMESPACE_FALCOR

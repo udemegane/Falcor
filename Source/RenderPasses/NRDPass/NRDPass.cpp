@@ -30,100 +30,92 @@
 
 #include "NRDPass.h"
 #include "RenderPasses/Shared/Denoising/NRDConstants.slang"
-#include <sstream>
 
 namespace
 {
-    const char kShaderPackRadiance[] = "RenderPasses/NRDPass/PackRadiance.cs.slang";
+const char kShaderPackRadiance[] = "RenderPasses/NRDPass/PackRadiance.cs.slang";
 
-    // Input buffer names.
-    const char kInputDiffuseRadianceHitDist[] = "diffuseRadianceHitDist";
-    const char kInputSpecularRadianceHitDist[] = "specularRadianceHitDist";
-    const char kInputSpecularHitDist[] = "specularHitDist";
-    const char kInputMotionVectors[] = "mvec";
-    const char kInputNormalRoughnessMaterialID[] = "normWRoughnessMaterialID";
-    const char kInputViewZ[] = "viewZ";
-    const char kInputDeltaPrimaryPosW[] = "deltaPrimaryPosW";
-    const char kInputDeltaSecondaryPosW[] = "deltaSecondaryPosW";
+// Input buffer names.
+const char kInputDiffuseRadianceHitDist[] = "diffuseRadianceHitDist";
+const char kInputSpecularRadianceHitDist[] = "specularRadianceHitDist";
+const char kInputSpecularHitDist[] = "specularHitDist";
+const char kInputMotionVectors[] = "mvec";
+const char kInputNormalRoughnessMaterialID[] = "normWRoughnessMaterialID";
+const char kInputViewZ[] = "viewZ";
+const char kInputDeltaPrimaryPosW[] = "deltaPrimaryPosW";
+const char kInputDeltaSecondaryPosW[] = "deltaSecondaryPosW";
 
-    // Output buffer names.
-    const char kOutputFilteredDiffuseRadianceHitDist[] = "filteredDiffuseRadianceHitDist";
-    const char kOutputFilteredSpecularRadianceHitDist[] = "filteredSpecularRadianceHitDist";
-    const char kOutputReflectionMotionVectors[] = "reflectionMvec";
-    const char kOutputDeltaMotionVectors[] = "deltaMvec";
+// Output buffer names.
+const char kOutputFilteredDiffuseRadianceHitDist[] = "filteredDiffuseRadianceHitDist";
+const char kOutputFilteredSpecularRadianceHitDist[] = "filteredSpecularRadianceHitDist";
+const char kOutputReflectionMotionVectors[] = "reflectionMvec";
+const char kOutputDeltaMotionVectors[] = "deltaMvec";
 
-    // Serialized parameters.
+// Serialized parameters.
 
-    const char kEnabled[] = "enabled";
-    const char kMethod[] = "method";
-    const char kOutputSize[] = "outputSize";
+const char kEnabled[] = "enabled";
+const char kMethod[] = "method";
+const char kOutputSize[] = "outputSize";
 
-    // Common settings.
-    const char kWorldSpaceMotion[] = "worldSpaceMotion";
-    const char kDisocclusionThreshold[] = "disocclusionThreshold";
+// Common settings.
+const char kWorldSpaceMotion[] = "worldSpaceMotion";
+const char kDisocclusionThreshold[] = "disocclusionThreshold";
 
-    // Pack radiance settings.
-    const char kMaxIntensity[] = "maxIntensity";
+// Pack radiance settings.
+const char kMaxIntensity[] = "maxIntensity";
 
-    // ReLAX diffuse/specular settings.
-    const char kDiffusePrepassBlurRadius[] = "diffusePrepassBlurRadius";
-    const char kSpecularPrepassBlurRadius[] = "specularPrepassBlurRadius";
-    const char kDiffuseMaxAccumulatedFrameNum[] = "diffuseMaxAccumulatedFrameNum";
-    const char kSpecularMaxAccumulatedFrameNum[] = "specularMaxAccumulatedFrameNum";
-    const char kDiffuseMaxFastAccumulatedFrameNum[] = "diffuseMaxFastAccumulatedFrameNum";
-    const char kSpecularMaxFastAccumulatedFrameNum[] = "specularMaxFastAccumulatedFrameNum";
-    const char kDiffusePhiLuminance[] = "diffusePhiLuminance";
-    const char kSpecularPhiLuminance[] = "specularPhiLuminance";
-    const char kDiffuseLobeAngleFraction[] = "diffuseLobeAngleFraction";
-    const char kSpecularLobeAngleFraction[] = "specularLobeAngleFraction";
-    const char kRoughnessFraction[] = "roughnessFraction";
-    const char kDiffuseHistoryRejectionNormalThreshold[] = "diffuseHistoryRejectionNormalThreshold";
-    const char kSpecularVarianceBoost[] = "specularVarianceBoost";
-    const char kSpecularLobeAngleSlack[] = "specularLobeAngleSlack";
-    const char kDisocclusionFixEdgeStoppingNormalPower[] = "disocclusionFixEdgeStoppingNormalPower";
-    const char kDisocclusionFixMaxRadius[] = "disocclusionFixMaxRadius";
-    const char kDisocclusionFixNumFramesToFix[] = "disocclusionFixNumFramesToFix";
-    const char kHistoryClampingColorBoxSigmaScale[] = "historyClampingColorBoxSigmaScale";
-    const char kSpatialVarianceEstimationHistoryThreshold[] = "spatialVarianceEstimationHistoryThreshold";
-    const char kAtrousIterationNum[] = "atrousIterationNum";
-    const char kMinLuminanceWeight[] = "minLuminanceWeight";
-    const char kDepthThreshold[] = "depthThreshold";
-    const char kRoughnessEdgeStoppingRelaxation[] = "roughnessEdgeStoppingRelaxation";
-    const char kNormalEdgeStoppingRelaxation[] = "normalEdgeStoppingRelaxation";
-    const char kLuminanceEdgeStoppingRelaxation[] = "luminanceEdgeStoppingRelaxation";
-    const char kEnableAntiFirefly[] = "enableAntiFirefly";
-    const char kEnableReprojectionTestSkippingWithoutMotion[] = "enableReprojectionTestSkippingWithoutMotion";
-    const char kEnableSpecularVirtualHistoryClamping[] = "enableSpecularVirtualHistoryClamping";
-    const char kEnableRoughnessEdgeStopping[] = "enableRoughnessEdgeStopping";
-    const char kEnableMaterialTestForDiffuse[] = "enableMaterialTestForDiffuse";
-    const char kEnableMaterialTestForSpecular[] = "enableMaterialTestForSpecular";
+// ReLAX diffuse/specular settings.
+const char kDiffusePrepassBlurRadius[] = "diffusePrepassBlurRadius";
+const char kSpecularPrepassBlurRadius[] = "specularPrepassBlurRadius";
+const char kDiffuseMaxAccumulatedFrameNum[] = "diffuseMaxAccumulatedFrameNum";
+const char kSpecularMaxAccumulatedFrameNum[] = "specularMaxAccumulatedFrameNum";
+const char kDiffuseMaxFastAccumulatedFrameNum[] = "diffuseMaxFastAccumulatedFrameNum";
+const char kSpecularMaxFastAccumulatedFrameNum[] = "specularMaxFastAccumulatedFrameNum";
+const char kDiffusePhiLuminance[] = "diffusePhiLuminance";
+const char kSpecularPhiLuminance[] = "specularPhiLuminance";
+const char kDiffuseLobeAngleFraction[] = "diffuseLobeAngleFraction";
+const char kSpecularLobeAngleFraction[] = "specularLobeAngleFraction";
+const char kRoughnessFraction[] = "roughnessFraction";
+const char kDiffuseHistoryRejectionNormalThreshold[] = "diffuseHistoryRejectionNormalThreshold";
+const char kSpecularVarianceBoost[] = "specularVarianceBoost";
+const char kSpecularLobeAngleSlack[] = "specularLobeAngleSlack";
+const char kDisocclusionFixEdgeStoppingNormalPower[] = "disocclusionFixEdgeStoppingNormalPower";
+const char kDisocclusionFixMaxRadius[] = "disocclusionFixMaxRadius";
+const char kDisocclusionFixNumFramesToFix[] = "disocclusionFixNumFramesToFix";
+const char kHistoryClampingColorBoxSigmaScale[] = "historyClampingColorBoxSigmaScale";
+const char kSpatialVarianceEstimationHistoryThreshold[] = "spatialVarianceEstimationHistoryThreshold";
+const char kAtrousIterationNum[] = "atrousIterationNum";
+const char kMinLuminanceWeight[] = "minLuminanceWeight";
+const char kDepthThreshold[] = "depthThreshold";
+const char kRoughnessEdgeStoppingRelaxation[] = "roughnessEdgeStoppingRelaxation";
+const char kNormalEdgeStoppingRelaxation[] = "normalEdgeStoppingRelaxation";
+const char kLuminanceEdgeStoppingRelaxation[] = "luminanceEdgeStoppingRelaxation";
+const char kEnableAntiFirefly[] = "enableAntiFirefly";
+const char kEnableReprojectionTestSkippingWithoutMotion[] = "enableReprojectionTestSkippingWithoutMotion";
+const char kEnableSpecularVirtualHistoryClamping[] = "enableSpecularVirtualHistoryClamping";
+const char kEnableRoughnessEdgeStopping[] = "enableRoughnessEdgeStopping";
+const char kEnableMaterialTestForDiffuse[] = "enableMaterialTestForDiffuse";
+const char kEnableMaterialTestForSpecular[] = "enableMaterialTestForSpecular";
 
-    // Expose only togglable methods.
-    // There is no reason to expose runtime toggle for other methods.
-    const Gui::DropdownList kDenoisingMethod =
-    {
-        { (uint32_t)NRDPass::DenoisingMethod::RelaxDiffuseSpecular, "ReLAX" },
-        { (uint32_t)NRDPass::DenoisingMethod::ReblurDiffuseSpecular, "ReBLUR" },
-    };
-}
+// Expose only togglable methods.
+// There is no reason to expose runtime toggle for other methods.
+const Gui::DropdownList kDenoisingMethod = {
+    {(uint32_t)NRDPass::DenoisingMethod::RelaxDiffuseSpecular, "ReLAX"},
+    {(uint32_t)NRDPass::DenoisingMethod::ReblurDiffuseSpecular, "ReBLUR"},
+};
+} // namespace
 
-NRDPass::SharedPtr NRDPass::create(std::shared_ptr<Device> pDevice, const Dictionary& dict)
-{
-    return SharedPtr(new NRDPass(std::move(pDevice), dict));
-}
-
-NRDPass::NRDPass(std::shared_ptr<Device> pDevice, const Dictionary& dict)
-    : RenderPass(std::move(pDevice))
+NRDPass::NRDPass(ref<Device> pDevice, const Properties& props) : RenderPass(pDevice)
 {
     mpDevice->requireD3D12();
 
-    Program::DefineList definesRelax;
+    DefineList definesRelax;
     definesRelax.add("NRD_USE_OCT_NORMAL_ENCODING", "1");
     definesRelax.add("NRD_USE_MATERIAL_ID", "0");
     definesRelax.add("NRD_METHOD", "0"); // NRD_METHOD_RELAX_DIFFUSE_SPECULAR
     mpPackRadiancePassRelax = ComputePass::create(mpDevice, kShaderPackRadiance, "main", definesRelax);
 
-    Program::DefineList definesReblur;
+    DefineList definesReblur;
     definesReblur.add("NRD_USE_OCT_NORMAL_ENCODING", "1");
     definesReblur.add("NRD_USE_MATERIAL_ID", "0");
     definesReblur.add("NRD_METHOD", "1"); // NRD_METHOD_REBLUR_DIFFUSE_SPECULAR
@@ -155,161 +147,215 @@ NRDPass::NRDPass(std::shared_ptr<Device> pDevice, const Dictionary& dict)
     mRelaxDiffuseSettings.depthThreshold = 0.02f;
 
     // Deserialize pass from dictionary.
-    for (const auto& [key, value] : dict)
+    for (const auto& [key, value] : props)
     {
-        if (key == kEnabled) mEnabled = value;
-        else if (key == kMethod) mDenoisingMethod = value;
-        else if (key == kOutputSize) mOutputSizeSelection = value;
+        if (key == kEnabled)
+            mEnabled = value;
+        else if (key == kMethod)
+            mDenoisingMethod = value;
+        else if (key == kOutputSize)
+            mOutputSizeSelection = value;
 
         // Common settings.
-        else if (key == kWorldSpaceMotion) mWorldSpaceMotion = value;
-        else if (key == kDisocclusionThreshold) mDisocclusionThreshold = value;
+        else if (key == kWorldSpaceMotion)
+            mWorldSpaceMotion = value;
+        else if (key == kDisocclusionThreshold)
+            mDisocclusionThreshold = value;
 
         // Pack radiance settings.
-        else if (key == kMaxIntensity) mMaxIntensity = value;
+        else if (key == kMaxIntensity)
+            mMaxIntensity = value;
 
         // ReLAX diffuse/specular settings.
         else if (mDenoisingMethod == DenoisingMethod::RelaxDiffuseSpecular || mDenoisingMethod == DenoisingMethod::ReblurDiffuseSpecular)
         {
-            if (key == kDiffusePrepassBlurRadius) mRelaxDiffuseSpecularSettings.diffusePrepassBlurRadius = value;
-            else if (key == kSpecularPrepassBlurRadius) mRelaxDiffuseSpecularSettings.specularPrepassBlurRadius = value;
-            else if (key == kDiffuseMaxAccumulatedFrameNum) mRelaxDiffuseSpecularSettings.diffuseMaxAccumulatedFrameNum = value;
-            else if (key == kSpecularMaxAccumulatedFrameNum) mRelaxDiffuseSpecularSettings.specularMaxAccumulatedFrameNum = value;
-            else if (key == kDiffuseMaxFastAccumulatedFrameNum) mRelaxDiffuseSpecularSettings.diffuseMaxFastAccumulatedFrameNum = value;
-            else if (key == kSpecularMaxFastAccumulatedFrameNum) mRelaxDiffuseSpecularSettings.specularMaxFastAccumulatedFrameNum = value;
-            else if (key == kDiffusePhiLuminance) mRelaxDiffuseSpecularSettings.diffusePhiLuminance = value;
-            else if (key == kSpecularPhiLuminance) mRelaxDiffuseSpecularSettings.specularPhiLuminance = value;
-            else if (key == kDiffuseLobeAngleFraction) mRelaxDiffuseSpecularSettings.diffuseLobeAngleFraction = value;
-            else if (key == kSpecularLobeAngleFraction) mRelaxDiffuseSpecularSettings.specularLobeAngleFraction = value;
-            else if (key == kRoughnessFraction) mRelaxDiffuseSpecularSettings.roughnessFraction = value;
-            else if (key == kDiffuseHistoryRejectionNormalThreshold) mRelaxDiffuseSpecularSettings.diffuseHistoryRejectionNormalThreshold = value;
-            else if (key == kSpecularVarianceBoost) mRelaxDiffuseSpecularSettings.specularVarianceBoost = value;
-            else if (key == kSpecularLobeAngleSlack) mRelaxDiffuseSpecularSettings.specularLobeAngleSlack = value;
-            else if (key == kDisocclusionFixEdgeStoppingNormalPower) mRelaxDiffuseSpecularSettings.disocclusionFixEdgeStoppingNormalPower = value;
-            else if (key == kDisocclusionFixMaxRadius) mRelaxDiffuseSpecularSettings.disocclusionFixMaxRadius = value;
-            else if (key == kDisocclusionFixNumFramesToFix) mRelaxDiffuseSpecularSettings.disocclusionFixNumFramesToFix = value;
-            else if (key == kHistoryClampingColorBoxSigmaScale) mRelaxDiffuseSpecularSettings.historyClampingColorBoxSigmaScale = value;
-            else if (key == kSpatialVarianceEstimationHistoryThreshold) mRelaxDiffuseSpecularSettings.spatialVarianceEstimationHistoryThreshold = value;
-            else if (key == kAtrousIterationNum) mRelaxDiffuseSpecularSettings.atrousIterationNum = value;
-            else if (key == kMinLuminanceWeight) mRelaxDiffuseSpecularSettings.minLuminanceWeight = value;
-            else if (key == kDepthThreshold) mRelaxDiffuseSpecularSettings.depthThreshold = value;
-            else if (key == kLuminanceEdgeStoppingRelaxation) mRelaxDiffuseSpecularSettings.luminanceEdgeStoppingRelaxation = value;
-            else if (key == kNormalEdgeStoppingRelaxation) mRelaxDiffuseSpecularSettings.normalEdgeStoppingRelaxation = value;
-            else if (key == kRoughnessEdgeStoppingRelaxation) mRelaxDiffuseSpecularSettings.roughnessEdgeStoppingRelaxation = value;
-            else if (key == kEnableAntiFirefly) mRelaxDiffuseSpecularSettings.enableAntiFirefly = value;
-            else if (key == kEnableReprojectionTestSkippingWithoutMotion) mRelaxDiffuseSpecularSettings.enableReprojectionTestSkippingWithoutMotion = value;
-            else if (key == kEnableSpecularVirtualHistoryClamping) mRelaxDiffuseSpecularSettings.enableSpecularVirtualHistoryClamping = value;
-            else if (key == kEnableRoughnessEdgeStopping) mRelaxDiffuseSpecularSettings.enableRoughnessEdgeStopping = value;
-            else if (key == kEnableMaterialTestForDiffuse) mRelaxDiffuseSpecularSettings.enableMaterialTestForDiffuse = value;
-            else if (key == kEnableMaterialTestForSpecular) mRelaxDiffuseSpecularSettings.enableMaterialTestForSpecular = value;
+            if (key == kDiffusePrepassBlurRadius)
+                mRelaxDiffuseSpecularSettings.diffusePrepassBlurRadius = value;
+            else if (key == kSpecularPrepassBlurRadius)
+                mRelaxDiffuseSpecularSettings.specularPrepassBlurRadius = value;
+            else if (key == kDiffuseMaxAccumulatedFrameNum)
+                mRelaxDiffuseSpecularSettings.diffuseMaxAccumulatedFrameNum = value;
+            else if (key == kSpecularMaxAccumulatedFrameNum)
+                mRelaxDiffuseSpecularSettings.specularMaxAccumulatedFrameNum = value;
+            else if (key == kDiffuseMaxFastAccumulatedFrameNum)
+                mRelaxDiffuseSpecularSettings.diffuseMaxFastAccumulatedFrameNum = value;
+            else if (key == kSpecularMaxFastAccumulatedFrameNum)
+                mRelaxDiffuseSpecularSettings.specularMaxFastAccumulatedFrameNum = value;
+            else if (key == kDiffusePhiLuminance)
+                mRelaxDiffuseSpecularSettings.diffusePhiLuminance = value;
+            else if (key == kSpecularPhiLuminance)
+                mRelaxDiffuseSpecularSettings.specularPhiLuminance = value;
+            else if (key == kDiffuseLobeAngleFraction)
+                mRelaxDiffuseSpecularSettings.diffuseLobeAngleFraction = value;
+            else if (key == kSpecularLobeAngleFraction)
+                mRelaxDiffuseSpecularSettings.specularLobeAngleFraction = value;
+            else if (key == kRoughnessFraction)
+                mRelaxDiffuseSpecularSettings.roughnessFraction = value;
+            else if (key == kDiffuseHistoryRejectionNormalThreshold)
+                mRelaxDiffuseSpecularSettings.diffuseHistoryRejectionNormalThreshold = value;
+            else if (key == kSpecularVarianceBoost)
+                mRelaxDiffuseSpecularSettings.specularVarianceBoost = value;
+            else if (key == kSpecularLobeAngleSlack)
+                mRelaxDiffuseSpecularSettings.specularLobeAngleSlack = value;
+            else if (key == kDisocclusionFixEdgeStoppingNormalPower)
+                mRelaxDiffuseSpecularSettings.disocclusionFixEdgeStoppingNormalPower = value;
+            else if (key == kDisocclusionFixMaxRadius)
+                mRelaxDiffuseSpecularSettings.disocclusionFixMaxRadius = value;
+            else if (key == kDisocclusionFixNumFramesToFix)
+                mRelaxDiffuseSpecularSettings.disocclusionFixNumFramesToFix = value;
+            else if (key == kHistoryClampingColorBoxSigmaScale)
+                mRelaxDiffuseSpecularSettings.historyClampingColorBoxSigmaScale = value;
+            else if (key == kSpatialVarianceEstimationHistoryThreshold)
+                mRelaxDiffuseSpecularSettings.spatialVarianceEstimationHistoryThreshold = value;
+            else if (key == kAtrousIterationNum)
+                mRelaxDiffuseSpecularSettings.atrousIterationNum = value;
+            else if (key == kMinLuminanceWeight)
+                mRelaxDiffuseSpecularSettings.minLuminanceWeight = value;
+            else if (key == kDepthThreshold)
+                mRelaxDiffuseSpecularSettings.depthThreshold = value;
+            else if (key == kLuminanceEdgeStoppingRelaxation)
+                mRelaxDiffuseSpecularSettings.luminanceEdgeStoppingRelaxation = value;
+            else if (key == kNormalEdgeStoppingRelaxation)
+                mRelaxDiffuseSpecularSettings.normalEdgeStoppingRelaxation = value;
+            else if (key == kRoughnessEdgeStoppingRelaxation)
+                mRelaxDiffuseSpecularSettings.roughnessEdgeStoppingRelaxation = value;
+            else if (key == kEnableAntiFirefly)
+                mRelaxDiffuseSpecularSettings.enableAntiFirefly = value;
+            else if (key == kEnableReprojectionTestSkippingWithoutMotion)
+                mRelaxDiffuseSpecularSettings.enableReprojectionTestSkippingWithoutMotion = value;
+            else if (key == kEnableSpecularVirtualHistoryClamping)
+                mRelaxDiffuseSpecularSettings.enableSpecularVirtualHistoryClamping = value;
+            else if (key == kEnableRoughnessEdgeStopping)
+                mRelaxDiffuseSpecularSettings.enableRoughnessEdgeStopping = value;
+            else if (key == kEnableMaterialTestForDiffuse)
+                mRelaxDiffuseSpecularSettings.enableMaterialTestForDiffuse = value;
+            else if (key == kEnableMaterialTestForSpecular)
+                mRelaxDiffuseSpecularSettings.enableMaterialTestForSpecular = value;
             else
             {
-                logWarning("Unknown field '{}' in NRD dictionary.", key);
+                logWarning("Unknown property '{}' in NRD properties.", key);
             }
         }
         else if (mDenoisingMethod == DenoisingMethod::RelaxDiffuse)
         {
-            if (key == kDiffusePrepassBlurRadius) mRelaxDiffuseSettings.prepassBlurRadius = value;
-            else if (key == kDiffuseMaxAccumulatedFrameNum) mRelaxDiffuseSettings.diffuseMaxAccumulatedFrameNum = value;
-            else if (key == kDiffuseMaxFastAccumulatedFrameNum) mRelaxDiffuseSettings.diffuseMaxFastAccumulatedFrameNum = value;
-            else if (key == kDiffusePhiLuminance) mRelaxDiffuseSettings.diffusePhiLuminance = value;
-            else if (key == kDiffuseLobeAngleFraction) mRelaxDiffuseSettings.diffuseLobeAngleFraction = value;
-            else if (key == kDiffuseHistoryRejectionNormalThreshold) mRelaxDiffuseSettings.diffuseHistoryRejectionNormalThreshold = value;
-            else if (key == kDisocclusionFixEdgeStoppingNormalPower) mRelaxDiffuseSettings.disocclusionFixEdgeStoppingNormalPower = value;
-            else if (key == kDisocclusionFixMaxRadius) mRelaxDiffuseSettings.disocclusionFixMaxRadius = value;
-            else if (key == kDisocclusionFixNumFramesToFix) mRelaxDiffuseSettings.disocclusionFixNumFramesToFix = value;
-            else if (key == kHistoryClampingColorBoxSigmaScale) mRelaxDiffuseSettings.historyClampingColorBoxSigmaScale = value;
-            else if (key == kSpatialVarianceEstimationHistoryThreshold) mRelaxDiffuseSettings.spatialVarianceEstimationHistoryThreshold = value;
-            else if (key == kAtrousIterationNum) mRelaxDiffuseSettings.atrousIterationNum = value;
-            else if (key == kMinLuminanceWeight) mRelaxDiffuseSettings.minLuminanceWeight = value;
-            else if (key == kDepthThreshold) mRelaxDiffuseSettings.depthThreshold = value;
-            else if (key == kEnableAntiFirefly) mRelaxDiffuseSettings.enableAntiFirefly = value;
-            else if (key == kEnableReprojectionTestSkippingWithoutMotion) mRelaxDiffuseSettings.enableReprojectionTestSkippingWithoutMotion = value;
-            else if (key == kEnableMaterialTestForDiffuse) mRelaxDiffuseSettings.enableMaterialTest = value;
+            if (key == kDiffusePrepassBlurRadius)
+                mRelaxDiffuseSettings.prepassBlurRadius = value;
+            else if (key == kDiffuseMaxAccumulatedFrameNum)
+                mRelaxDiffuseSettings.diffuseMaxAccumulatedFrameNum = value;
+            else if (key == kDiffuseMaxFastAccumulatedFrameNum)
+                mRelaxDiffuseSettings.diffuseMaxFastAccumulatedFrameNum = value;
+            else if (key == kDiffusePhiLuminance)
+                mRelaxDiffuseSettings.diffusePhiLuminance = value;
+            else if (key == kDiffuseLobeAngleFraction)
+                mRelaxDiffuseSettings.diffuseLobeAngleFraction = value;
+            else if (key == kDiffuseHistoryRejectionNormalThreshold)
+                mRelaxDiffuseSettings.diffuseHistoryRejectionNormalThreshold = value;
+            else if (key == kDisocclusionFixEdgeStoppingNormalPower)
+                mRelaxDiffuseSettings.disocclusionFixEdgeStoppingNormalPower = value;
+            else if (key == kDisocclusionFixMaxRadius)
+                mRelaxDiffuseSettings.disocclusionFixMaxRadius = value;
+            else if (key == kDisocclusionFixNumFramesToFix)
+                mRelaxDiffuseSettings.disocclusionFixNumFramesToFix = value;
+            else if (key == kHistoryClampingColorBoxSigmaScale)
+                mRelaxDiffuseSettings.historyClampingColorBoxSigmaScale = value;
+            else if (key == kSpatialVarianceEstimationHistoryThreshold)
+                mRelaxDiffuseSettings.spatialVarianceEstimationHistoryThreshold = value;
+            else if (key == kAtrousIterationNum)
+                mRelaxDiffuseSettings.atrousIterationNum = value;
+            else if (key == kMinLuminanceWeight)
+                mRelaxDiffuseSettings.minLuminanceWeight = value;
+            else if (key == kDepthThreshold)
+                mRelaxDiffuseSettings.depthThreshold = value;
+            else if (key == kEnableAntiFirefly)
+                mRelaxDiffuseSettings.enableAntiFirefly = value;
+            else if (key == kEnableReprojectionTestSkippingWithoutMotion)
+                mRelaxDiffuseSettings.enableReprojectionTestSkippingWithoutMotion = value;
+            else if (key == kEnableMaterialTestForDiffuse)
+                mRelaxDiffuseSettings.enableMaterialTest = value;
             else
             {
-                logWarning("Unknown field '{}' in NRD dictionary.", key);
+                logWarning("Unknown property '{}' in NRD properties.", key);
             }
         }
         else
         {
-            logWarning("Unknown field '{}' in NRD dictionary.", key);
+            logWarning("Unknown property '{}' in NRD properties.", key);
         }
     }
 }
 
-Falcor::Dictionary NRDPass::getScriptingDictionary()
+Properties NRDPass::getProperties() const
 {
-    Dictionary dict;
+    Properties props;
 
-    dict[kEnabled] = mEnabled;
-    dict[kMethod] = mDenoisingMethod;
-    dict[kOutputSize] = mOutputSizeSelection;
+    props[kEnabled] = mEnabled;
+    props[kMethod] = mDenoisingMethod;
+    props[kOutputSize] = mOutputSizeSelection;
 
     // Common settings.
-    dict[kWorldSpaceMotion] = mWorldSpaceMotion;
-    dict[kDisocclusionThreshold] = mDisocclusionThreshold;
+    props[kWorldSpaceMotion] = mWorldSpaceMotion;
+    props[kDisocclusionThreshold] = mDisocclusionThreshold;
 
     // Pack radiance settings.
-    dict[kMaxIntensity] = mMaxIntensity;
+    props[kMaxIntensity] = mMaxIntensity;
 
     // ReLAX diffuse/specular settings.
     if (mDenoisingMethod == DenoisingMethod::RelaxDiffuseSpecular || mDenoisingMethod == DenoisingMethod::ReblurDiffuseSpecular)
     {
-        dict[kDiffusePrepassBlurRadius] = mRelaxDiffuseSpecularSettings.diffusePrepassBlurRadius;
-        dict[kSpecularPrepassBlurRadius] = mRelaxDiffuseSpecularSettings.specularPrepassBlurRadius;
-        dict[kDiffuseMaxAccumulatedFrameNum] = mRelaxDiffuseSpecularSettings.diffuseMaxAccumulatedFrameNum;
-        dict[kSpecularMaxAccumulatedFrameNum] = mRelaxDiffuseSpecularSettings.specularMaxAccumulatedFrameNum;
-        dict[kDiffuseMaxFastAccumulatedFrameNum] = mRelaxDiffuseSpecularSettings.diffuseMaxFastAccumulatedFrameNum;
-        dict[kSpecularMaxFastAccumulatedFrameNum] = mRelaxDiffuseSpecularSettings.specularMaxFastAccumulatedFrameNum;
-        dict[kDiffusePhiLuminance] = mRelaxDiffuseSpecularSettings.diffusePhiLuminance;
-        dict[kSpecularPhiLuminance] = mRelaxDiffuseSpecularSettings.specularPhiLuminance;
-        dict[kDiffuseLobeAngleFraction] = mRelaxDiffuseSpecularSettings.diffuseLobeAngleFraction;
-        dict[kSpecularLobeAngleFraction] = mRelaxDiffuseSpecularSettings.specularLobeAngleFraction;
-        dict[kRoughnessFraction] = mRelaxDiffuseSpecularSettings.roughnessFraction;
-        dict[kDiffuseHistoryRejectionNormalThreshold] = mRelaxDiffuseSpecularSettings.diffuseHistoryRejectionNormalThreshold;
-        dict[kSpecularVarianceBoost] = mRelaxDiffuseSpecularSettings.specularVarianceBoost;
-        dict[kSpecularLobeAngleSlack] = mRelaxDiffuseSpecularSettings.specularLobeAngleSlack;
-        dict[kDisocclusionFixEdgeStoppingNormalPower] = mRelaxDiffuseSpecularSettings.disocclusionFixEdgeStoppingNormalPower;
-        dict[kDisocclusionFixMaxRadius] = mRelaxDiffuseSpecularSettings.disocclusionFixMaxRadius;
-        dict[kDisocclusionFixNumFramesToFix] = mRelaxDiffuseSpecularSettings.disocclusionFixNumFramesToFix;
-        dict[kHistoryClampingColorBoxSigmaScale] = mRelaxDiffuseSpecularSettings.historyClampingColorBoxSigmaScale;
-        dict[kSpatialVarianceEstimationHistoryThreshold] = mRelaxDiffuseSpecularSettings.spatialVarianceEstimationHistoryThreshold;
-        dict[kAtrousIterationNum] = mRelaxDiffuseSpecularSettings.atrousIterationNum;
-        dict[kMinLuminanceWeight] = mRelaxDiffuseSpecularSettings.minLuminanceWeight;
-        dict[kDepthThreshold] = mRelaxDiffuseSpecularSettings.depthThreshold;
-        dict[kLuminanceEdgeStoppingRelaxation] = mRelaxDiffuseSpecularSettings.luminanceEdgeStoppingRelaxation;
-        dict[kNormalEdgeStoppingRelaxation] = mRelaxDiffuseSpecularSettings.normalEdgeStoppingRelaxation;
-        dict[kRoughnessEdgeStoppingRelaxation] = mRelaxDiffuseSpecularSettings.roughnessEdgeStoppingRelaxation;
-        dict[kEnableAntiFirefly] = mRelaxDiffuseSpecularSettings.enableAntiFirefly;
-        dict[kEnableReprojectionTestSkippingWithoutMotion] = mRelaxDiffuseSpecularSettings.enableReprojectionTestSkippingWithoutMotion;
-        dict[kEnableSpecularVirtualHistoryClamping] = mRelaxDiffuseSpecularSettings.enableSpecularVirtualHistoryClamping;
-        dict[kEnableRoughnessEdgeStopping] = mRelaxDiffuseSpecularSettings.enableRoughnessEdgeStopping;
-        dict[kEnableMaterialTestForDiffuse] = mRelaxDiffuseSpecularSettings.enableMaterialTestForDiffuse;
-        dict[kEnableMaterialTestForSpecular] = mRelaxDiffuseSpecularSettings.enableMaterialTestForSpecular;
+        props[kDiffusePrepassBlurRadius] = mRelaxDiffuseSpecularSettings.diffusePrepassBlurRadius;
+        props[kSpecularPrepassBlurRadius] = mRelaxDiffuseSpecularSettings.specularPrepassBlurRadius;
+        props[kDiffuseMaxAccumulatedFrameNum] = mRelaxDiffuseSpecularSettings.diffuseMaxAccumulatedFrameNum;
+        props[kSpecularMaxAccumulatedFrameNum] = mRelaxDiffuseSpecularSettings.specularMaxAccumulatedFrameNum;
+        props[kDiffuseMaxFastAccumulatedFrameNum] = mRelaxDiffuseSpecularSettings.diffuseMaxFastAccumulatedFrameNum;
+        props[kSpecularMaxFastAccumulatedFrameNum] = mRelaxDiffuseSpecularSettings.specularMaxFastAccumulatedFrameNum;
+        props[kDiffusePhiLuminance] = mRelaxDiffuseSpecularSettings.diffusePhiLuminance;
+        props[kSpecularPhiLuminance] = mRelaxDiffuseSpecularSettings.specularPhiLuminance;
+        props[kDiffuseLobeAngleFraction] = mRelaxDiffuseSpecularSettings.diffuseLobeAngleFraction;
+        props[kSpecularLobeAngleFraction] = mRelaxDiffuseSpecularSettings.specularLobeAngleFraction;
+        props[kRoughnessFraction] = mRelaxDiffuseSpecularSettings.roughnessFraction;
+        props[kDiffuseHistoryRejectionNormalThreshold] = mRelaxDiffuseSpecularSettings.diffuseHistoryRejectionNormalThreshold;
+        props[kSpecularVarianceBoost] = mRelaxDiffuseSpecularSettings.specularVarianceBoost;
+        props[kSpecularLobeAngleSlack] = mRelaxDiffuseSpecularSettings.specularLobeAngleSlack;
+        props[kDisocclusionFixEdgeStoppingNormalPower] = mRelaxDiffuseSpecularSettings.disocclusionFixEdgeStoppingNormalPower;
+        props[kDisocclusionFixMaxRadius] = mRelaxDiffuseSpecularSettings.disocclusionFixMaxRadius;
+        props[kDisocclusionFixNumFramesToFix] = mRelaxDiffuseSpecularSettings.disocclusionFixNumFramesToFix;
+        props[kHistoryClampingColorBoxSigmaScale] = mRelaxDiffuseSpecularSettings.historyClampingColorBoxSigmaScale;
+        props[kSpatialVarianceEstimationHistoryThreshold] = mRelaxDiffuseSpecularSettings.spatialVarianceEstimationHistoryThreshold;
+        props[kAtrousIterationNum] = mRelaxDiffuseSpecularSettings.atrousIterationNum;
+        props[kMinLuminanceWeight] = mRelaxDiffuseSpecularSettings.minLuminanceWeight;
+        props[kDepthThreshold] = mRelaxDiffuseSpecularSettings.depthThreshold;
+        props[kLuminanceEdgeStoppingRelaxation] = mRelaxDiffuseSpecularSettings.luminanceEdgeStoppingRelaxation;
+        props[kNormalEdgeStoppingRelaxation] = mRelaxDiffuseSpecularSettings.normalEdgeStoppingRelaxation;
+        props[kRoughnessEdgeStoppingRelaxation] = mRelaxDiffuseSpecularSettings.roughnessEdgeStoppingRelaxation;
+        props[kEnableAntiFirefly] = mRelaxDiffuseSpecularSettings.enableAntiFirefly;
+        props[kEnableReprojectionTestSkippingWithoutMotion] = mRelaxDiffuseSpecularSettings.enableReprojectionTestSkippingWithoutMotion;
+        props[kEnableSpecularVirtualHistoryClamping] = mRelaxDiffuseSpecularSettings.enableSpecularVirtualHistoryClamping;
+        props[kEnableRoughnessEdgeStopping] = mRelaxDiffuseSpecularSettings.enableRoughnessEdgeStopping;
+        props[kEnableMaterialTestForDiffuse] = mRelaxDiffuseSpecularSettings.enableMaterialTestForDiffuse;
+        props[kEnableMaterialTestForSpecular] = mRelaxDiffuseSpecularSettings.enableMaterialTestForSpecular;
     }
     else if (mDenoisingMethod == DenoisingMethod::RelaxDiffuse)
     {
-        dict[kDiffusePrepassBlurRadius] = mRelaxDiffuseSettings.prepassBlurRadius;
-        dict[kDiffuseMaxAccumulatedFrameNum] = mRelaxDiffuseSettings.diffuseMaxAccumulatedFrameNum;
-        dict[kDiffuseMaxFastAccumulatedFrameNum] = mRelaxDiffuseSettings.diffuseMaxFastAccumulatedFrameNum;
-        dict[kDiffusePhiLuminance] = mRelaxDiffuseSettings.diffusePhiLuminance;
-        dict[kDiffuseLobeAngleFraction] = mRelaxDiffuseSettings.diffuseLobeAngleFraction;
-        dict[kDiffuseHistoryRejectionNormalThreshold] = mRelaxDiffuseSettings.diffuseHistoryRejectionNormalThreshold;
-        dict[kDisocclusionFixEdgeStoppingNormalPower] = mRelaxDiffuseSettings.disocclusionFixEdgeStoppingNormalPower;
-        dict[kDisocclusionFixMaxRadius] = mRelaxDiffuseSettings.disocclusionFixMaxRadius;
-        dict[kDisocclusionFixNumFramesToFix] = mRelaxDiffuseSettings.disocclusionFixNumFramesToFix;
-        dict[kHistoryClampingColorBoxSigmaScale] = mRelaxDiffuseSettings.historyClampingColorBoxSigmaScale;
-        dict[kSpatialVarianceEstimationHistoryThreshold] = mRelaxDiffuseSettings.spatialVarianceEstimationHistoryThreshold;
-        dict[kAtrousIterationNum] = mRelaxDiffuseSettings.atrousIterationNum;
-        dict[kMinLuminanceWeight] = mRelaxDiffuseSettings.minLuminanceWeight;
-        dict[kDepthThreshold] = mRelaxDiffuseSettings.depthThreshold;
-        dict[kEnableAntiFirefly] = mRelaxDiffuseSettings.enableAntiFirefly;
-        dict[kEnableReprojectionTestSkippingWithoutMotion] = mRelaxDiffuseSettings.enableReprojectionTestSkippingWithoutMotion;
-        dict[kEnableMaterialTestForDiffuse] = mRelaxDiffuseSettings.enableMaterialTest;
+        props[kDiffusePrepassBlurRadius] = mRelaxDiffuseSettings.prepassBlurRadius;
+        props[kDiffuseMaxAccumulatedFrameNum] = mRelaxDiffuseSettings.diffuseMaxAccumulatedFrameNum;
+        props[kDiffuseMaxFastAccumulatedFrameNum] = mRelaxDiffuseSettings.diffuseMaxFastAccumulatedFrameNum;
+        props[kDiffusePhiLuminance] = mRelaxDiffuseSettings.diffusePhiLuminance;
+        props[kDiffuseLobeAngleFraction] = mRelaxDiffuseSettings.diffuseLobeAngleFraction;
+        props[kDiffuseHistoryRejectionNormalThreshold] = mRelaxDiffuseSettings.diffuseHistoryRejectionNormalThreshold;
+        props[kDisocclusionFixEdgeStoppingNormalPower] = mRelaxDiffuseSettings.disocclusionFixEdgeStoppingNormalPower;
+        props[kDisocclusionFixMaxRadius] = mRelaxDiffuseSettings.disocclusionFixMaxRadius;
+        props[kDisocclusionFixNumFramesToFix] = mRelaxDiffuseSettings.disocclusionFixNumFramesToFix;
+        props[kHistoryClampingColorBoxSigmaScale] = mRelaxDiffuseSettings.historyClampingColorBoxSigmaScale;
+        props[kSpatialVarianceEstimationHistoryThreshold] = mRelaxDiffuseSettings.spatialVarianceEstimationHistoryThreshold;
+        props[kAtrousIterationNum] = mRelaxDiffuseSettings.atrousIterationNum;
+        props[kMinLuminanceWeight] = mRelaxDiffuseSettings.minLuminanceWeight;
+        props[kDepthThreshold] = mRelaxDiffuseSettings.depthThreshold;
+        props[kEnableAntiFirefly] = mRelaxDiffuseSettings.enableAntiFirefly;
+        props[kEnableReprojectionTestSkippingWithoutMotion] = mRelaxDiffuseSettings.enableReprojectionTestSkippingWithoutMotion;
+        props[kEnableMaterialTestForDiffuse] = mRelaxDiffuseSettings.enableMaterialTest;
     }
 
-    return dict;
+    return props;
 }
 
 RenderPassReflection NRDPass::reflect(const CompileData& compileData)
@@ -326,8 +372,12 @@ RenderPassReflection NRDPass::reflect(const CompileData& compileData)
         reflector.addInput(kInputNormalRoughnessMaterialID, "World normal, roughness, and material ID");
         reflector.addInput(kInputMotionVectors, "Motion vectors");
 
-        reflector.addOutput(kOutputFilteredDiffuseRadianceHitDist, "Filtered diffuse radiance and hit distance").format(ResourceFormat::RGBA16Float).texture2D(sz.x, sz.y);
-        reflector.addOutput(kOutputFilteredSpecularRadianceHitDist, "Filtered specular radiance and hit distance").format(ResourceFormat::RGBA16Float).texture2D(sz.x, sz.y);
+        reflector.addOutput(kOutputFilteredDiffuseRadianceHitDist, "Filtered diffuse radiance and hit distance")
+            .format(ResourceFormat::RGBA16Float)
+            .texture2D(sz.x, sz.y);
+        reflector.addOutput(kOutputFilteredSpecularRadianceHitDist, "Filtered specular radiance and hit distance")
+            .format(ResourceFormat::RGBA16Float)
+            .texture2D(sz.x, sz.y);
     }
     else if (mDenoisingMethod == DenoisingMethod::RelaxDiffuse)
     {
@@ -336,7 +386,9 @@ RenderPassReflection NRDPass::reflect(const CompileData& compileData)
         reflector.addInput(kInputNormalRoughnessMaterialID, "World normal, roughness, and material ID");
         reflector.addInput(kInputMotionVectors, "Motion vectors");
 
-        reflector.addOutput(kOutputFilteredDiffuseRadianceHitDist, "Filtered diffuse radiance and hit distance").format(ResourceFormat::RGBA16Float).texture2D(sz.x, sz.y);
+        reflector.addOutput(kOutputFilteredDiffuseRadianceHitDist, "Filtered diffuse radiance and hit distance")
+            .format(ResourceFormat::RGBA16Float)
+            .texture2D(sz.x, sz.y);
     }
     else if (mDenoisingMethod == DenoisingMethod::SpecularReflectionMv)
     {
@@ -345,7 +397,9 @@ RenderPassReflection NRDPass::reflect(const CompileData& compileData)
         reflector.addInput(kInputNormalRoughnessMaterialID, "World normal, roughness, and material ID");
         reflector.addInput(kInputMotionVectors, "Motion vectors");
 
-        reflector.addOutput(kOutputReflectionMotionVectors, "Reflection motion vectors in screen space").format(ResourceFormat::RG16Float).texture2D(sz.x, sz.y);
+        reflector.addOutput(kOutputReflectionMotionVectors, "Reflection motion vectors in screen space")
+            .format(ResourceFormat::RG16Float)
+            .texture2D(sz.x, sz.y);
     }
     else if (mDenoisingMethod == DenoisingMethod::SpecularDeltaMv)
     {
@@ -353,7 +407,9 @@ RenderPassReflection NRDPass::reflect(const CompileData& compileData)
         reflector.addInput(kInputDeltaSecondaryPosW, "Delta secondary world position");
         reflector.addInput(kInputMotionVectors, "Motion vectors");
 
-        reflector.addOutput(kOutputDeltaMotionVectors, "Delta motion vectors in screen space").format(ResourceFormat::RG16Float).texture2D(sz.x, sz.y);
+        reflector.addOutput(kOutputDeltaMotionVectors, "Delta motion vectors in screen space")
+            .format(ResourceFormat::RG16Float)
+            .texture2D(sz.x, sz.y);
     }
     else
     {
@@ -374,7 +430,8 @@ void NRDPass::compile(RenderContext* pRenderContext, const CompileData& compileD
 
 void NRDPass::execute(RenderContext* pRenderContext, const RenderData& renderData)
 {
-    if (!mpScene) return;
+    if (!mpScene)
+        return;
 
     bool enabled = false;
     enabled = mEnabled;
@@ -387,12 +444,21 @@ void NRDPass::execute(RenderContext* pRenderContext, const RenderData& renderDat
     {
         if (mDenoisingMethod == DenoisingMethod::RelaxDiffuseSpecular || mDenoisingMethod == DenoisingMethod::ReblurDiffuseSpecular)
         {
-            pRenderContext->blit(renderData.getTexture(kInputDiffuseRadianceHitDist)->getSRV(), renderData.getTexture(kOutputFilteredDiffuseRadianceHitDist)->getRTV());
-            pRenderContext->blit(renderData.getTexture(kInputSpecularRadianceHitDist)->getSRV(), renderData.getTexture(kOutputFilteredSpecularRadianceHitDist)->getRTV());
+            pRenderContext->blit(
+                renderData.getTexture(kInputDiffuseRadianceHitDist)->getSRV(),
+                renderData.getTexture(kOutputFilteredDiffuseRadianceHitDist)->getRTV()
+            );
+            pRenderContext->blit(
+                renderData.getTexture(kInputSpecularRadianceHitDist)->getSRV(),
+                renderData.getTexture(kOutputFilteredSpecularRadianceHitDist)->getRTV()
+            );
         }
         else if (mDenoisingMethod == DenoisingMethod::RelaxDiffuse)
         {
-            pRenderContext->blit(renderData.getTexture(kInputDiffuseRadianceHitDist)->getSRV(), renderData.getTexture(kOutputFilteredDiffuseRadianceHitDist)->getRTV());
+            pRenderContext->blit(
+                renderData.getTexture(kInputDiffuseRadianceHitDist)->getSRV(),
+                renderData.getTexture(kOutputFilteredDiffuseRadianceHitDist)->getRTV()
+            );
         }
         else if (mDenoisingMethod == DenoisingMethod::SpecularReflectionMv)
         {
@@ -402,7 +468,9 @@ void NRDPass::execute(RenderContext* pRenderContext, const RenderData& renderDat
             }
             else
             {
-                pRenderContext->blit(renderData.getTexture(kInputMotionVectors)->getSRV(), renderData.getTexture(kOutputReflectionMotionVectors)->getRTV());
+                pRenderContext->blit(
+                    renderData.getTexture(kInputMotionVectors)->getSRV(), renderData.getTexture(kOutputReflectionMotionVectors)->getRTV()
+                );
             }
         }
         else if (mDenoisingMethod == DenoisingMethod::SpecularDeltaMv)
@@ -413,7 +481,9 @@ void NRDPass::execute(RenderContext* pRenderContext, const RenderData& renderDat
             }
             else
             {
-                pRenderContext->blit(renderData.getTexture(kInputMotionVectors)->getSRV(), renderData.getTexture(kOutputDeltaMotionVectors)->getRTV());
+                pRenderContext->blit(
+                    renderData.getTexture(kInputMotionVectors)->getSRV(), renderData.getTexture(kOutputDeltaMotionVectors)->getRTV()
+                );
             }
         }
     }
@@ -445,6 +515,7 @@ void NRDPass::renderUI(Gui::Widgets& widget)
         // ReLAX diffuse/specular settings.
         if (auto group = widget.group("ReLAX Diffuse/Specular"))
         {
+            // clang-format off
             group.text("Prepass:");
             group.slider("Specular blur radius", mRelaxDiffuseSpecularSettings.specularPrepassBlurRadius, 0.0f, 100.0f, false, "%.0f");
             group.slider("Diffuse blur radius", mRelaxDiffuseSpecularSettings.diffusePrepassBlurRadius, 0.0f, 100.0f, false, "%.0f");
@@ -481,6 +552,7 @@ void NRDPass::renderUI(Gui::Widgets& widget)
             group.slider("Normal relaxation", mRelaxDiffuseSpecularSettings.normalEdgeStoppingRelaxation, 0.0f, 1.0f, false, "%.2f");
             group.slider("Luminance relaxation", mRelaxDiffuseSpecularSettings.luminanceEdgeStoppingRelaxation, 0.0f, 1.0f, false, "%.2f");
             group.checkbox("Roughness edge stopping", mRelaxDiffuseSpecularSettings.enableRoughnessEdgeStopping);
+            // clang-format on
         }
     }
     else if (mDenoisingMethod == DenoisingMethod::RelaxDiffuse)
@@ -495,6 +567,7 @@ void NRDPass::renderUI(Gui::Widgets& widget)
         // ReLAX diffuse settings.
         if (auto group = widget.group("ReLAX Diffuse"))
         {
+            // clang-format off
             group.text("Prepass:");
             group.slider("Diffuse blur radius", mRelaxDiffuseSettings.prepassBlurRadius, 0.0f, 100.0f, false, "%.0f");
             group.text("Reprojection:");
@@ -518,6 +591,7 @@ void NRDPass::renderUI(Gui::Widgets& widget)
             group.slider("Min luminance weight", mRelaxDiffuseSettings.minLuminanceWeight, 0.0f, 1.0f, false, "%.2f");
             group.slider("Depth weight (relative fraction)", mRelaxDiffuseSettings.depthThreshold, 0.0f, 0.05f, false, "%.2f");
             group.slider("Diffuse lobe angle fraction", mRelaxDiffuseSettings.diffuseLobeAngleFraction, 0.0f, 2.0f, false, "%.1f");
+            // clang-format on
         }
     }
     else if (mDenoisingMethod == DenoisingMethod::ReblurDiffuseSpecular)
@@ -531,6 +605,7 @@ void NRDPass::renderUI(Gui::Widgets& widget)
 
         if (auto group = widget.group("ReBLUR Diffuse/Specular"))
         {
+            // clang-format off
             const float kEpsilon = 0.0001f;
             if (auto group2 = group.group("Specular lobe trimming"))
             {
@@ -582,6 +657,7 @@ void NRDPass::renderUI(Gui::Widgets& widget)
             group.checkbox("Performance mode", mReblurSettings.enablePerformanceMode);
             group.checkbox("Material test for diffuse", mReblurSettings.enableMaterialTestForDiffuse);
             group.checkbox("Material test for specular", mReblurSettings.enableMaterialTestForSpecular);
+            // clang-format on
         }
     }
     else if (mDenoisingMethod == DenoisingMethod::SpecularReflectionMv)
@@ -594,7 +670,7 @@ void NRDPass::renderUI(Gui::Widgets& widget)
     }
 }
 
-void NRDPass::setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene)
+void NRDPass::setScene(RenderContext* pRenderContext, const ref<Scene>& pScene)
 {
     mpScene = pScene;
 }
@@ -614,56 +690,100 @@ static void nrdFree(void* userArg, void* memory)
     free(memory);
 }
 
-static Falcor::ResourceFormat getFalcorFormat(nrd::Format format)
+static ResourceFormat getFalcorFormat(nrd::Format format)
 {
     switch (format)
     {
-    case nrd::Format::R8_UNORM:             return Falcor::ResourceFormat::R8Unorm;
-    case nrd::Format::R8_SNORM:             return Falcor::ResourceFormat::R8Snorm;
-    case nrd::Format::R8_UINT:              return Falcor::ResourceFormat::R8Uint;
-    case nrd::Format::R8_SINT:              return Falcor::ResourceFormat::R8Int;
-    case nrd::Format::RG8_UNORM:            return Falcor::ResourceFormat::RG8Unorm;
-    case nrd::Format::RG8_SNORM:            return Falcor::ResourceFormat::RG8Snorm;
-    case nrd::Format::RG8_UINT:             return Falcor::ResourceFormat::RG8Uint;
-    case nrd::Format::RG8_SINT:             return Falcor::ResourceFormat::RG8Int;
-    case nrd::Format::RGBA8_UNORM:          return Falcor::ResourceFormat::RGBA8Unorm;
-    case nrd::Format::RGBA8_SNORM:          return Falcor::ResourceFormat::RGBA8Snorm;
-    case nrd::Format::RGBA8_UINT:           return Falcor::ResourceFormat::RGBA8Uint;
-    case nrd::Format::RGBA8_SINT:           return Falcor::ResourceFormat::RGBA8Int;
-    case nrd::Format::RGBA8_SRGB:           return Falcor::ResourceFormat::RGBA8UnormSrgb;
-    case nrd::Format::R16_UNORM:            return Falcor::ResourceFormat::R16Unorm;
-    case nrd::Format::R16_SNORM:            return Falcor::ResourceFormat::R16Snorm;
-    case nrd::Format::R16_UINT:             return Falcor::ResourceFormat::R16Uint;
-    case nrd::Format::R16_SINT:             return Falcor::ResourceFormat::R16Int;
-    case nrd::Format::R16_SFLOAT:           return Falcor::ResourceFormat::R16Float;
-    case nrd::Format::RG16_UNORM:           return Falcor::ResourceFormat::RG16Unorm;
-    case nrd::Format::RG16_SNORM:           return Falcor::ResourceFormat::RG16Snorm;
-    case nrd::Format::RG16_UINT:            return Falcor::ResourceFormat::RG16Uint;
-    case nrd::Format::RG16_SINT:            return Falcor::ResourceFormat::RG16Int;
-    case nrd::Format::RG16_SFLOAT:          return Falcor::ResourceFormat::RG16Float;
-    case nrd::Format::RGBA16_UNORM:         return Falcor::ResourceFormat::RGBA16Unorm;
-    case nrd::Format::RGBA16_SNORM:         return Falcor::ResourceFormat::Unknown; // Not defined in Falcor
-    case nrd::Format::RGBA16_UINT:          return Falcor::ResourceFormat::RGBA16Uint;
-    case nrd::Format::RGBA16_SINT:          return Falcor::ResourceFormat::RGBA16Int;
-    case nrd::Format::RGBA16_SFLOAT:        return Falcor::ResourceFormat::RGBA16Float;
-    case nrd::Format::R32_UINT:             return Falcor::ResourceFormat::R32Uint;
-    case nrd::Format::R32_SINT:             return Falcor::ResourceFormat::R32Int;
-    case nrd::Format::R32_SFLOAT:           return Falcor::ResourceFormat::R32Float;
-    case nrd::Format::RG32_UINT:            return Falcor::ResourceFormat::RG32Uint;
-    case nrd::Format::RG32_SINT:            return Falcor::ResourceFormat::RG32Int;
-    case nrd::Format::RG32_SFLOAT:          return Falcor::ResourceFormat::RG32Float;
-    case nrd::Format::RGB32_UINT:           return Falcor::ResourceFormat::RGB32Uint;
-    case nrd::Format::RGB32_SINT:           return Falcor::ResourceFormat::RGB32Int;
-    case nrd::Format::RGB32_SFLOAT:         return Falcor::ResourceFormat::RGB32Float;
-    case nrd::Format::RGBA32_UINT:          return Falcor::ResourceFormat::RGBA32Uint;
-    case nrd::Format::RGBA32_SINT:          return Falcor::ResourceFormat::RGBA32Int;
-    case nrd::Format::RGBA32_SFLOAT:        return Falcor::ResourceFormat::RGBA32Float;
-    case nrd::Format::R10_G10_B10_A2_UNORM: return Falcor::ResourceFormat::RGB10A2Unorm;
-    case nrd::Format::R10_G10_B10_A2_UINT:  return Falcor::ResourceFormat::RGB10A2Uint;
-    case nrd::Format::R11_G11_B10_UFLOAT:   return Falcor::ResourceFormat::R11G11B10Float;
-    case nrd::Format::R9_G9_B9_E5_UFLOAT:   return Falcor::ResourceFormat::RGB9E5Float;
+    case nrd::Format::R8_UNORM:
+        return ResourceFormat::R8Unorm;
+    case nrd::Format::R8_SNORM:
+        return ResourceFormat::R8Snorm;
+    case nrd::Format::R8_UINT:
+        return ResourceFormat::R8Uint;
+    case nrd::Format::R8_SINT:
+        return ResourceFormat::R8Int;
+    case nrd::Format::RG8_UNORM:
+        return ResourceFormat::RG8Unorm;
+    case nrd::Format::RG8_SNORM:
+        return ResourceFormat::RG8Snorm;
+    case nrd::Format::RG8_UINT:
+        return ResourceFormat::RG8Uint;
+    case nrd::Format::RG8_SINT:
+        return ResourceFormat::RG8Int;
+    case nrd::Format::RGBA8_UNORM:
+        return ResourceFormat::RGBA8Unorm;
+    case nrd::Format::RGBA8_SNORM:
+        return ResourceFormat::RGBA8Snorm;
+    case nrd::Format::RGBA8_UINT:
+        return ResourceFormat::RGBA8Uint;
+    case nrd::Format::RGBA8_SINT:
+        return ResourceFormat::RGBA8Int;
+    case nrd::Format::RGBA8_SRGB:
+        return ResourceFormat::RGBA8UnormSrgb;
+    case nrd::Format::R16_UNORM:
+        return ResourceFormat::R16Unorm;
+    case nrd::Format::R16_SNORM:
+        return ResourceFormat::R16Snorm;
+    case nrd::Format::R16_UINT:
+        return ResourceFormat::R16Uint;
+    case nrd::Format::R16_SINT:
+        return ResourceFormat::R16Int;
+    case nrd::Format::R16_SFLOAT:
+        return ResourceFormat::R16Float;
+    case nrd::Format::RG16_UNORM:
+        return ResourceFormat::RG16Unorm;
+    case nrd::Format::RG16_SNORM:
+        return ResourceFormat::RG16Snorm;
+    case nrd::Format::RG16_UINT:
+        return ResourceFormat::RG16Uint;
+    case nrd::Format::RG16_SINT:
+        return ResourceFormat::RG16Int;
+    case nrd::Format::RG16_SFLOAT:
+        return ResourceFormat::RG16Float;
+    case nrd::Format::RGBA16_UNORM:
+        return ResourceFormat::RGBA16Unorm;
+    case nrd::Format::RGBA16_SNORM:
+        return ResourceFormat::Unknown; // Not defined in Falcor
+    case nrd::Format::RGBA16_UINT:
+        return ResourceFormat::RGBA16Uint;
+    case nrd::Format::RGBA16_SINT:
+        return ResourceFormat::RGBA16Int;
+    case nrd::Format::RGBA16_SFLOAT:
+        return ResourceFormat::RGBA16Float;
+    case nrd::Format::R32_UINT:
+        return ResourceFormat::R32Uint;
+    case nrd::Format::R32_SINT:
+        return ResourceFormat::R32Int;
+    case nrd::Format::R32_SFLOAT:
+        return ResourceFormat::R32Float;
+    case nrd::Format::RG32_UINT:
+        return ResourceFormat::RG32Uint;
+    case nrd::Format::RG32_SINT:
+        return ResourceFormat::RG32Int;
+    case nrd::Format::RG32_SFLOAT:
+        return ResourceFormat::RG32Float;
+    case nrd::Format::RGB32_UINT:
+        return ResourceFormat::RGB32Uint;
+    case nrd::Format::RGB32_SINT:
+        return ResourceFormat::RGB32Int;
+    case nrd::Format::RGB32_SFLOAT:
+        return ResourceFormat::RGB32Float;
+    case nrd::Format::RGBA32_UINT:
+        return ResourceFormat::RGBA32Uint;
+    case nrd::Format::RGBA32_SINT:
+        return ResourceFormat::RGBA32Int;
+    case nrd::Format::RGBA32_SFLOAT:
+        return ResourceFormat::RGBA32Float;
+    case nrd::Format::R10_G10_B10_A2_UNORM:
+        return ResourceFormat::RGB10A2Unorm;
+    case nrd::Format::R10_G10_B10_A2_UINT:
+        return ResourceFormat::RGB10A2Uint;
+    case nrd::Format::R11_G11_B10_UFLOAT:
+        return ResourceFormat::R11G11B10Float;
+    case nrd::Format::R9_G9_B9_E5_UFLOAT:
+        return ResourceFormat::RGB9E5Float;
     default:
-        throw RuntimeError("Unsupported NRD format.");
+        FALCOR_THROW("Unsupported NRD format.");
     }
 }
 
@@ -671,11 +791,16 @@ static nrd::Method getNrdMethod(NRDPass::DenoisingMethod denoisingMethod)
 {
     switch (denoisingMethod)
     {
-    case NRDPass::DenoisingMethod::RelaxDiffuseSpecular:    return nrd::Method::RELAX_DIFFUSE_SPECULAR;
-    case NRDPass::DenoisingMethod::RelaxDiffuse:            return nrd::Method::RELAX_DIFFUSE;
-    case NRDPass::DenoisingMethod::ReblurDiffuseSpecular:   return nrd::Method::REBLUR_DIFFUSE_SPECULAR;
-    case NRDPass::DenoisingMethod::SpecularReflectionMv:        return nrd::Method::SPECULAR_REFLECTION_MV;
-    case NRDPass::DenoisingMethod::SpecularDeltaMv:     return nrd::Method::SPECULAR_DELTA_MV;
+    case NRDPass::DenoisingMethod::RelaxDiffuseSpecular:
+        return nrd::Method::RELAX_DIFFUSE_SPECULAR;
+    case NRDPass::DenoisingMethod::RelaxDiffuse:
+        return nrd::Method::RELAX_DIFFUSE;
+    case NRDPass::DenoisingMethod::ReblurDiffuseSpecular:
+        return nrd::Method::REBLUR_DIFFUSE_SPECULAR;
+    case NRDPass::DenoisingMethod::SpecularReflectionMv:
+        return nrd::Method::SPECULAR_REFLECTION_MV;
+    case NRDPass::DenoisingMethod::SpecularDeltaMv:
+        return nrd::Method::SPECULAR_DELTA_MV;
     default:
         FALCOR_UNREACHABLE();
         return nrd::Method::RELAX_DIFFUSE_SPECULAR;
@@ -684,12 +809,11 @@ static nrd::Method getNrdMethod(NRDPass::DenoisingMethod denoisingMethod)
 
 /// Copies into col-major layout, as the NRD library works in column major layout,
 /// while Falcor uses row-major layout
-static void copyMatrix(float* dstMatrix, const rmcv::mat4& srcMatrix)
+static void copyMatrix(float* dstMatrix, const float4x4& srcMatrix)
 {
-    auto col_major = rmcv::transpose(srcMatrix);
-    memcpy(dstMatrix, static_cast<const float*>(col_major.data()), sizeof(rmcv::mat4));
+    float4x4 col_major = transpose(srcMatrix);
+    memcpy(dstMatrix, static_cast<const float*>(col_major.data()), sizeof(float4x4));
 }
-
 
 void NRDPass::reinit()
 {
@@ -698,10 +822,7 @@ void NRDPass::reinit()
 
     const nrd::LibraryDesc& libraryDesc = nrd::GetLibraryDesc();
 
-    const nrd::MethodDesc methods[] =
-    {
-        { getNrdMethod(mDenoisingMethod), uint16_t(mScreenSize.x), uint16_t(mScreenSize.y) }
-    };
+    const nrd::MethodDesc methods[] = {{getNrdMethod(mDenoisingMethod), uint16_t(mScreenSize.x), uint16_t(mScreenSize.y)}};
 
     nrd::DenoiserCreationDesc denoiserCreationDesc;
     denoiserCreationDesc.memoryAllocatorInterface.Allocate = nrdAllocate;
@@ -712,7 +833,8 @@ void NRDPass::reinit()
 
     nrd::Result res = nrd::CreateDenoiser(denoiserCreationDesc, mpDenoiser);
 
-    if (res != nrd::Result::SUCCESS) throw RuntimeError("NRDPass: Failed to create NRD denoiser");
+    if (res != nrd::Result::SUCCESS)
+        FALCOR_THROW("NRDPass: Failed to create NRD denoiser");
 
     createResources();
     createPipelines();
@@ -730,13 +852,14 @@ void NRDPass::createPipelines()
     const nrd::DenoiserDesc& denoiserDesc = nrd::GetDenoiserDesc(*mpDenoiser);
 
     // Create samplers descriptor layout and set.
-    Falcor::D3D12DescriptorSetLayout SamplersDescriptorSetLayout;
+    D3D12DescriptorSetLayout SamplersDescriptorSetLayout;
 
     for (uint32_t j = 0; j < denoiserDesc.staticSamplerNum; j++)
     {
         SamplersDescriptorSetLayout.addRange(ShaderResourceType::Sampler, denoiserDesc.staticSamplers[j].registerIndex, 1);
     }
-    mpSamplersDescriptorSet = Falcor::D3D12DescriptorSet::create(mpDevice.get(), SamplersDescriptorSetLayout, D3D12DescriptorSetBindingUsage::ExplicitBind);
+    mpSamplersDescriptorSet =
+        D3D12DescriptorSet::create(mpDevice, SamplersDescriptorSetLayout, D3D12DescriptorSetBindingUsage::ExplicitBind);
 
     // Set sampler descriptors right away.
     for (uint32_t j = 0; j < denoiserDesc.staticSamplerNum; j++)
@@ -751,7 +874,7 @@ void NRDPass::createPipelines()
         const nrd::ComputeShader& nrdComputeShader = nrdPipelineDesc.computeShaderDXIL;
 
         // Initialize descriptor set.
-        Falcor::D3D12DescriptorSetLayout CBVSRVUAVdescriptorSetLayout;
+        D3D12DescriptorSetLayout CBVSRVUAVdescriptorSetLayout;
 
         // Add constant buffer to descriptor set.
         CBVSRVUAVdescriptorSetLayout.addRange(ShaderResourceType::Cbv, denoiserDesc.constantBufferDesc.registerIndex, 1);
@@ -760,9 +883,9 @@ void NRDPass::createPipelines()
         {
             const nrd::DescriptorRangeDesc& nrdDescriptorRange = nrdPipelineDesc.descriptorRanges[j];
 
-            ShaderResourceType descriptorType = nrdDescriptorRange.descriptorType == nrd::DescriptorType::TEXTURE ?
-                ShaderResourceType::TextureSrv :
-                ShaderResourceType::TextureUav;
+            ShaderResourceType descriptorType = nrdDescriptorRange.descriptorType == nrd::DescriptorType::TEXTURE
+                                                    ? ShaderResourceType::TextureSrv
+                                                    : ShaderResourceType::TextureUav;
 
             CBVSRVUAVdescriptorSetLayout.addRange(descriptorType, nrdDescriptorRange.baseRegisterIndex, nrdDescriptorRange.descriptorNum);
         }
@@ -770,13 +893,13 @@ void NRDPass::createPipelines()
         mCBVSRVUAVdescriptorSetLayouts.push_back(CBVSRVUAVdescriptorSetLayout);
 
         // Create root signature for the NRD pass.
-        Falcor::D3D12RootSignature::Desc rootSignatureDesc;
+        D3D12RootSignature::Desc rootSignatureDesc;
         rootSignatureDesc.addDescriptorSet(SamplersDescriptorSetLayout);
         rootSignatureDesc.addDescriptorSet(CBVSRVUAVdescriptorSetLayout);
 
-        const Falcor::D3D12RootSignature::Desc& desc = rootSignatureDesc;
+        const D3D12RootSignature::Desc& desc = rootSignatureDesc;
 
-        Falcor::D3D12RootSignature::SharedPtr pRootSig = Falcor::D3D12RootSignature::create(mpDevice.get(), desc);
+        ref<D3D12RootSignature> pRootSig = D3D12RootSignature::create(mpDevice, desc);
 
         mpRootSignatures.push_back(pRootSig);
 
@@ -784,23 +907,25 @@ void NRDPass::createPipelines()
         {
             std::string shaderFileName = "nrd/Shaders/Source/" + std::string(nrdPipelineDesc.shaderFileName) + ".hlsl";
 
-            Program::Desc programDesc;
+            ProgramDesc programDesc;
             programDesc.addShaderLibrary(shaderFileName).csEntry(nrdPipelineDesc.shaderEntryPointName);
-            programDesc.setCompilerFlags(Shader::CompilerFlags::MatrixLayoutColumnMajor);
-            Program::DefineList defines;
+            programDesc.setCompilerFlags(SlangCompilerFlags::MatrixLayoutColumnMajor);
+            // Disable warning 30056: non-short-circuiting `?:` operator is deprecated, use 'select' instead.
+            programDesc.setCompilerArguments({"-Wno-30056"});
+            DefineList defines;
             defines.add("NRD_COMPILER_DXC");
             defines.add("NRD_USE_OCT_NORMAL_ENCODING", "1");
             defines.add("NRD_USE_MATERIAL_ID", "0");
-            ComputePass::SharedPtr pPass = ComputePass::create(mpDevice, programDesc, defines);
+            ref<ComputePass> pPass = ComputePass::create(mpDevice, programDesc, defines);
 
-            ComputeProgram::SharedPtr pProgram = pPass->getProgram();
-            ProgramKernels::SharedConstPtr pProgramKernels = pProgram->getActiveVersion()->getKernels(mpDevice.get(), pPass->getVars().get());
+            ref<Program> pProgram = pPass->getProgram();
+            ref<const ProgramKernels> pProgramKernels = pProgram->getActiveVersion()->getKernels(mpDevice.get(), pPass->getVars().get());
 
-            ComputeStateObject::Desc csoDesc;
-            csoDesc.setProgramKernels(pProgramKernels);
-            csoDesc.setD3D12RootSignatureOverride(pRootSig);
+            ComputeStateObjectDesc csoDesc;
+            csoDesc.pProgramKernels = pProgramKernels;
+            csoDesc.pD3D12RootSignatureOverride = pRootSig;
 
-            ComputeStateObject::SharedPtr pCSO = ComputeStateObject::create(mpDevice.get(), csoDesc);
+            ref<ComputeStateObject> pCSO = mpDevice->createComputeStateObject(csoDesc);
 
             mpPasses.push_back(pPass);
             mpCachedProgramKernels.push_back(pProgramKernels);
@@ -815,7 +940,6 @@ void NRDPass::createResources()
     mpSamplers.clear();
     mpPermanentTextures.clear();
     mpTransientTextures.clear();
-    mpConstantBuffer = nullptr;
 
     const nrd::DenoiserDesc& denoiserDesc = nrd::GetDenoiserDesc(*mpDenoiser);
     const uint32_t poolSize = denoiserDesc.permanentPoolSize + denoiserDesc.transientPoolSize;
@@ -824,28 +948,28 @@ void NRDPass::createResources()
     for (uint32_t i = 0; i < denoiserDesc.staticSamplerNum; i++)
     {
         const nrd::StaticSamplerDesc& nrdStaticsampler = denoiserDesc.staticSamplers[i];
-        Falcor::Sampler::Desc samplerDesc;
-        samplerDesc.setFilterMode(Falcor::Sampler::Filter::Linear, Falcor::Sampler::Filter::Linear, Falcor::Sampler::Filter::Point);
+        Sampler::Desc samplerDesc;
+        samplerDesc.setFilterMode(TextureFilteringMode::Linear, TextureFilteringMode::Linear, TextureFilteringMode::Point);
 
         if (nrdStaticsampler.sampler == nrd::Sampler::NEAREST_CLAMP || nrdStaticsampler.sampler == nrd::Sampler::LINEAR_CLAMP)
         {
-            samplerDesc.setAddressingMode(Falcor::Sampler::AddressMode::Clamp, Falcor::Sampler::AddressMode::Clamp, Falcor::Sampler::AddressMode::Clamp);
+            samplerDesc.setAddressingMode(TextureAddressingMode::Clamp, TextureAddressingMode::Clamp, TextureAddressingMode::Clamp);
         }
         else
         {
-            samplerDesc.setAddressingMode(Falcor::Sampler::AddressMode::Mirror, Falcor::Sampler::AddressMode::Mirror, Falcor::Sampler::AddressMode::Mirror);
+            samplerDesc.setAddressingMode(TextureAddressingMode::Mirror, TextureAddressingMode::Mirror, TextureAddressingMode::Mirror);
         }
 
         if (nrdStaticsampler.sampler == nrd::Sampler::NEAREST_CLAMP || nrdStaticsampler.sampler == nrd::Sampler::NEAREST_MIRRORED_REPEAT)
         {
-            samplerDesc.setFilterMode(Falcor::Sampler::Filter::Point, Falcor::Sampler::Filter::Point, Falcor::Sampler::Filter::Point);
+            samplerDesc.setFilterMode(TextureFilteringMode::Point, TextureFilteringMode::Point, TextureFilteringMode::Point);
         }
         else
         {
-            samplerDesc.setFilterMode(Falcor::Sampler::Filter::Linear, Falcor::Sampler::Filter::Linear, Falcor::Sampler::Filter::Point);
+            samplerDesc.setFilterMode(TextureFilteringMode::Linear, TextureFilteringMode::Linear, TextureFilteringMode::Point);
         }
 
-        mpSamplers.push_back(Falcor::Sampler::create(mpDevice.get(), samplerDesc));
+        mpSamplers.push_back(mpDevice->createSampler(samplerDesc));
     }
 
     // Texture pool.
@@ -854,32 +978,26 @@ void NRDPass::createResources()
         const bool isPermanent = (i < denoiserDesc.permanentPoolSize);
 
         // Get texture desc.
-        const nrd::TextureDesc& nrdTextureDesc = isPermanent
-            ? denoiserDesc.permanentPool[i]
-            : denoiserDesc.transientPool[i - denoiserDesc.permanentPoolSize];
+        const nrd::TextureDesc& nrdTextureDesc =
+            isPermanent ? denoiserDesc.permanentPool[i] : denoiserDesc.transientPool[i - denoiserDesc.permanentPoolSize];
 
         // Create texture.
-        Falcor::ResourceFormat textureFormat = getFalcorFormat(nrdTextureDesc.format);
-        Falcor::Texture::SharedPtr pTexture = Texture::create2D(
-            mpDevice.get(),
-            nrdTextureDesc.width, nrdTextureDesc.height,
-            textureFormat, 1u, nrdTextureDesc.mipNum,
+        ResourceFormat textureFormat = getFalcorFormat(nrdTextureDesc.format);
+        ref<Texture> pTexture = mpDevice->createTexture2D(
+            nrdTextureDesc.width,
+            nrdTextureDesc.height,
+            textureFormat,
+            1u,
+            nrdTextureDesc.mipNum,
             nullptr,
-            ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
+            ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess
+        );
 
         if (isPermanent)
             mpPermanentTextures.push_back(pTexture);
         else
             mpTransientTextures.push_back(pTexture);
     }
-
-    // Constant buffer.
-    mpConstantBuffer = Buffer::create(
-        mpDevice.get(),
-        denoiserDesc.constantBufferDesc.maxDataSize,
-        Falcor::ResourceBindFlags::Constant,
-        Falcor::Buffer::CpuAccess::Write,
-        nullptr);
 }
 
 void NRDPass::executeInternal(RenderContext* pRenderContext, const RenderData& renderData)
@@ -896,7 +1014,7 @@ void NRDPass::executeInternal(RenderContext* pRenderContext, const RenderData& r
         // Run classic Falcor compute pass to pack radiance.
         {
             FALCOR_PROFILE(pRenderContext, "PackRadiance");
-            auto perImageCB = mpPackRadiancePassRelax["PerImageCB"];
+            auto perImageCB = mpPackRadiancePassRelax->getRootVar()["PerImageCB"];
 
             perImageCB["gMaxIntensity"] = mMaxIntensity;
             perImageCB["gDiffuseRadianceHitDist"] = renderData.getTexture(kInputDiffuseRadianceHitDist);
@@ -911,7 +1029,7 @@ void NRDPass::executeInternal(RenderContext* pRenderContext, const RenderData& r
         // Run classic Falcor compute pass to pack radiance and hit distance.
         {
             FALCOR_PROFILE(pRenderContext, "PackRadianceHitDist");
-            auto perImageCB = mpPackRadiancePassRelax["PerImageCB"];
+            auto perImageCB = mpPackRadiancePassRelax->getRootVar()["PerImageCB"];
 
             perImageCB["gMaxIntensity"] = mMaxIntensity;
             perImageCB["gDiffuseRadianceHitDist"] = renderData.getTexture(kInputDiffuseRadianceHitDist);
@@ -925,7 +1043,7 @@ void NRDPass::executeInternal(RenderContext* pRenderContext, const RenderData& r
         // Run classic Falcor compute pass to pack radiance and hit distance.
         {
             FALCOR_PROFILE(pRenderContext, "PackRadianceHitDist");
-            auto perImageCB = mpPackRadiancePassReblur["PerImageCB"];
+            auto perImageCB = mpPackRadiancePassReblur->getRootVar()["PerImageCB"];
 
             perImageCB["gHitDistParams"].setBlob(mReblurSettings.hitDistanceParameters);
             perImageCB["gMaxIntensity"] = mMaxIntensity;
@@ -955,8 +1073,8 @@ void NRDPass::executeInternal(RenderContext* pRenderContext, const RenderData& r
     }
 
     // Initialize common settings.
-    rmcv::mat4 viewMatrix = mpScene->getCamera()->getViewMatrix();
-    rmcv::mat4 projMatrix = mpScene->getCamera()->getData().projMatNoJitter;
+    float4x4 viewMatrix = mpScene->getCamera()->getViewMatrix();
+    float4x4 projMatrix = mpScene->getCamera()->getData().projMatNoJitter;
     if (mFrameIndex == 0)
     {
         mPrevViewMatrix = viewMatrix;
@@ -993,7 +1111,7 @@ void NRDPass::executeInternal(RenderContext* pRenderContext, const RenderData& r
     }
 
     // Submit the existing command list and start a new one.
-    pRenderContext->flush();
+    pRenderContext->submit();
 }
 
 void NRDPass::dispatch(RenderContext* pRenderContext, const RenderData& renderData, const nrd::DispatchDesc& dispatchDesc)
@@ -1005,13 +1123,16 @@ void NRDPass::dispatch(RenderContext* pRenderContext, const RenderData& renderDa
     mpRootSignatures[dispatchDesc.pipelineIndex]->bindForCompute(pRenderContext);
 
     // Upload constants.
-    mpConstantBuffer->setBlob(dispatchDesc.constantBufferData, 0, dispatchDesc.constantBufferDataSize);
+    auto cbAllocation = mpDevice->getUploadHeap()->allocate(dispatchDesc.constantBufferDataSize, ResourceBindFlags::Constant);
+    std::memcpy(cbAllocation.pData, dispatchDesc.constantBufferData, dispatchDesc.constantBufferDataSize);
 
     // Create descriptor set for the NRD pass.
-    D3D12DescriptorSet::SharedPtr CBVSRVUAVDescriptorSet = D3D12DescriptorSet::create(mpDevice.get(), mCBVSRVUAVdescriptorSetLayouts[dispatchDesc.pipelineIndex], D3D12DescriptorSetBindingUsage::ExplicitBind);
+    ref<D3D12DescriptorSet> CBVSRVUAVDescriptorSet = D3D12DescriptorSet::create(
+        mpDevice, mCBVSRVUAVdescriptorSetLayouts[dispatchDesc.pipelineIndex], D3D12DescriptorSetBindingUsage::ExplicitBind
+    );
 
     // Set CBV.
-    mpCBV = D3D12ConstantBufferView::create(mpDevice.get(), mpConstantBuffer);
+    mpCBV = D3D12ConstantBufferView::create(mpDevice, cbAllocation.getGpuAddress(), cbAllocation.size);
     CBVSRVUAVDescriptorSet->setCbv(0 /* NB: range #0 is CBV range */, denoiserDesc.constantBufferDesc.registerIndex, mpCBV.get());
 
     uint32_t resourceIndex = 0;
@@ -1026,7 +1147,7 @@ void NRDPass::dispatch(RenderContext* pRenderContext, const RenderData& renderDa
 
             FALCOR_ASSERT(resource.stateNeeded == nrdDescriptorRange.descriptorType);
 
-            Falcor::Texture::SharedPtr texture;
+            ref<Texture> texture;
 
             switch (resource.type)
             {
@@ -1080,23 +1201,32 @@ void NRDPass::dispatch(RenderContext* pRenderContext, const RenderData& renderDa
             FALCOR_ASSERT(texture);
 
             // Set up resource barriers.
-            Falcor::Resource::State newState = resource.stateNeeded == nrd::DescriptorType::TEXTURE ? Falcor::Resource::State::ShaderResource : Falcor::Resource::State::UnorderedAccess;
+            Resource::State newState =
+                resource.stateNeeded == nrd::DescriptorType::TEXTURE ? Resource::State::ShaderResource : Resource::State::UnorderedAccess;
             for (uint16_t mip = 0; mip < resource.mipNum; mip++)
             {
-                const Falcor::ResourceViewInfo viewInfo = Falcor::ResourceViewInfo(resource.mipOffset + mip, 1, 0, 1);
+                const ResourceViewInfo viewInfo = ResourceViewInfo(resource.mipOffset + mip, 1, 0, 1);
                 pRenderContext->resourceBarrier(texture.get(), newState, &viewInfo);
             }
 
             // Set the SRV and UAV descriptors.
             if (nrdDescriptorRange.descriptorType == nrd::DescriptorType::TEXTURE)
             {
-                Falcor::ShaderResourceView::SharedPtr pSRV = texture->getSRV(resource.mipOffset, resource.mipNum, 0, 1);
-                CBVSRVUAVDescriptorSet->setSrv(descriptorRangeIndex + 1 /* NB: range #0 is CBV range */, nrdDescriptorRange.baseRegisterIndex + descriptorOffset, pSRV.get());
+                ref<ShaderResourceView> pSRV = texture->getSRV(resource.mipOffset, resource.mipNum, 0, 1);
+                CBVSRVUAVDescriptorSet->setSrv(
+                    descriptorRangeIndex + 1 /* NB: range #0 is CBV range */,
+                    nrdDescriptorRange.baseRegisterIndex + descriptorOffset,
+                    pSRV.get()
+                );
             }
             else
             {
-                Falcor::UnorderedAccessView::SharedPtr pUAV = texture->getUAV(resource.mipOffset, 0, 1);
-                CBVSRVUAVDescriptorSet->setUav(descriptorRangeIndex + 1 /* NB: range #0 is CBV range */, nrdDescriptorRange.baseRegisterIndex + descriptorOffset, pUAV.get());
+                ref<UnorderedAccessView> pUAV = texture->getUAV(resource.mipOffset, 0, 1);
+                CBVSRVUAVDescriptorSet->setUav(
+                    descriptorRangeIndex + 1 /* NB: range #0 is CBV range */,
+                    nrdDescriptorRange.baseRegisterIndex + descriptorOffset,
+                    pUAV.get()
+                );
             }
 
             resourceIndex++;
@@ -1110,9 +1240,9 @@ void NRDPass::dispatch(RenderContext* pRenderContext, const RenderData& renderDa
     CBVSRVUAVDescriptorSet->bindForCompute(pRenderContext, mpRootSignatures[dispatchDesc.pipelineIndex].get(), 1);
 
     // Set pipeline state.
-    ComputePass::SharedPtr pPass = mpPasses[dispatchDesc.pipelineIndex];
-    ComputeProgram::SharedPtr pProgram = pPass->getProgram();
-    ProgramKernels::SharedConstPtr pProgramKernels = pProgram->getActiveVersion()->getKernels(mpDevice.get(), pPass->getVars().get());
+    ref<ComputePass> pPass = mpPasses[dispatchDesc.pipelineIndex];
+    ref<Program> pProgram = pPass->getProgram();
+    ref<const ProgramKernels> pProgramKernels = pProgram->getActiveVersion()->getKernels(mpDevice.get(), pPass->getVars().get());
 
     // Check if anything changed.
     bool newProgram = (pProgramKernels.get() != mpCachedProgramKernels[dispatchDesc.pipelineIndex].get());
@@ -1120,34 +1250,26 @@ void NRDPass::dispatch(RenderContext* pRenderContext, const RenderData& renderDa
     {
         mpCachedProgramKernels[dispatchDesc.pipelineIndex] = pProgramKernels;
 
-        ComputeStateObject::Desc desc;
-        desc.setProgramKernels(pProgramKernels);
-        desc.setD3D12RootSignatureOverride(mpRootSignatures[dispatchDesc.pipelineIndex]);
+        ComputeStateObjectDesc desc;
+        desc.pProgramKernels = pProgramKernels;
+        desc.pD3D12RootSignatureOverride = mpRootSignatures[dispatchDesc.pipelineIndex];
 
-        ComputeStateObject::SharedPtr pCSO = ComputeStateObject::create(mpDevice.get(), desc);
+        ref<ComputeStateObject> pCSO = mpDevice->createComputeStateObject(desc);
         mpCSOs[dispatchDesc.pipelineIndex] = pCSO;
     }
-    ID3D12GraphicsCommandList* pCommandList = pRenderContext->getLowLevelData()->getCommandBufferNativeHandle().as<ID3D12GraphicsCommandList*>();
+    ID3D12GraphicsCommandList* pCommandList =
+        pRenderContext->getLowLevelData()->getCommandBufferNativeHandle().as<ID3D12GraphicsCommandList*>();
     ID3D12PipelineState* pPipelineState = mpCSOs[dispatchDesc.pipelineIndex]->getNativeHandle().as<ID3D12PipelineState*>();
 
     pCommandList->SetPipelineState(pPipelineState);
 
     // Dispatch.
     pCommandList->Dispatch(dispatchDesc.gridWidth, dispatchDesc.gridHeight, 1);
+
+    mpDevice->getUploadHeap()->release(cbAllocation);
 }
 
-static void registerNRDPass(pybind11::module& m)
-{
-    pybind11::enum_<NRDPass::DenoisingMethod> profile(m, "NRDMethod");
-    profile.value("RelaxDiffuseSpecular", NRDPass::DenoisingMethod::RelaxDiffuseSpecular);
-    profile.value("RelaxDiffuse", NRDPass::DenoisingMethod::RelaxDiffuse);
-    profile.value("ReblurDiffuseSpecular", NRDPass::DenoisingMethod::ReblurDiffuseSpecular);
-    profile.value("SpecularReflectionMv", NRDPass::DenoisingMethod::SpecularReflectionMv);
-    profile.value("SpecularDeltaMv", NRDPass::DenoisingMethod::SpecularDeltaMv);
-}
-
-extern "C" FALCOR_API_EXPORT void registerPlugin(Falcor::PluginRegistry& registry)
+extern "C" FALCOR_API_EXPORT void registerPlugin(PluginRegistry& registry)
 {
     registry.registerClass<RenderPass, NRDPass>();
-    ScriptBindings::registerBinding(registerNRDPass);
 }

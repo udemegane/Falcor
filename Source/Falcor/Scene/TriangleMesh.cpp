@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -26,7 +26,8 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #include "TriangleMesh.h"
-#include "Core/Assert.h"
+#include "GlobalState.h"
+#include "Core/Error.h"
 #include "Core/Platform/OS.h"
 #include "Utils/Logger.h"
 #include "Utils/Scripting/ScriptBindings.h"
@@ -37,24 +38,24 @@
 
 namespace Falcor
 {
-    TriangleMesh::SharedPtr TriangleMesh::create()
+    ref<TriangleMesh> TriangleMesh::create()
     {
-        return SharedPtr(new TriangleMesh());
+        return ref<TriangleMesh>(new TriangleMesh());
     }
 
-    TriangleMesh::SharedPtr TriangleMesh::create(const VertexList& vertices, const IndexList& indices, bool frontFaceCW)
+    ref<TriangleMesh> TriangleMesh::create(const VertexList& vertices, const IndexList& indices, bool frontFaceCW)
     {
-        return SharedPtr(new TriangleMesh(vertices, indices, frontFaceCW));
+        return ref<TriangleMesh>(new TriangleMesh(vertices, indices, frontFaceCW));
     }
 
-    TriangleMesh::SharedPtr TriangleMesh::createDummy()
+    ref<TriangleMesh> TriangleMesh::createDummy()
     {
         VertexList vertices = {{{0.f, 0.f, 0.f}, {0.f, 1.f, 0.f}, {0.f, 0.f}}};
         IndexList indices = {0, 0, 0};
         return create(vertices, indices);
     }
 
-    TriangleMesh::SharedPtr TriangleMesh::createQuad(float2 size)
+    ref<TriangleMesh> TriangleMesh::createQuad(float2 size)
     {
         float2 hsize = 0.5f * size;
         float3 normal{0.f, 1.f, 0.f};
@@ -75,7 +76,7 @@ namespace Falcor
         return create(vertices, indices, frontFaceCW);
     }
 
-    TriangleMesh::SharedPtr TriangleMesh::createDisk(float radius, uint32_t segments)
+    ref<TriangleMesh> TriangleMesh::createDisk(float radius, uint32_t segments)
     {
         std::vector<Vertex> vertices(segments + 1);
         std::vector<uint32_t> indices(segments * 3);
@@ -98,7 +99,7 @@ namespace Falcor
         return create(vertices, indices, false);
     }
 
-    TriangleMesh::SharedPtr TriangleMesh::createCube(float3 size)
+    ref<TriangleMesh> TriangleMesh::createCube(float3 size)
     {
         const float3 positions[6][4] =
         {
@@ -147,7 +148,7 @@ namespace Falcor
         return create(vertices, indices, frontFaceCW);
     }
 
-    TriangleMesh::SharedPtr TriangleMesh::createSphere(float radius, uint32_t segmentsU, uint32_t segmentsV)
+    ref<TriangleMesh> TriangleMesh::createSphere(float radius, uint32_t segmentsU, uint32_t segmentsV)
     {
         VertexList vertices;
         IndexList indices;
@@ -192,12 +193,11 @@ namespace Falcor
         return create(vertices, indices);
     }
 
-    TriangleMesh::SharedPtr TriangleMesh::createFromFile(const std::filesystem::path& path, bool smoothNormals)
+    ref<TriangleMesh> TriangleMesh::createFromFile(const std::filesystem::path& path, ImportFlags importFlags)
     {
-        std::filesystem::path fullPath;
-        if (!findFileInDataDirectories(path, fullPath))
+        if (!std::filesystem::exists(path))
         {
-            logWarning("Error when loading triangle mesh. Can't find mesh file '{}'.", path);
+            logWarning("Failed to load triangle mesh from '{}': File not found", path);
             return nullptr;
         }
 
@@ -206,24 +206,25 @@ namespace Falcor
         unsigned int flags =
             aiProcess_FlipUVs |
             aiProcess_Triangulate |
-            (smoothNormals ? aiProcess_GenSmoothNormals : aiProcess_GenNormals) |
             aiProcess_PreTransformVertices;
+        flags |= is_set(importFlags, ImportFlags::GenSmoothNormals) ? aiProcess_GenSmoothNormals : aiProcess_GenNormals;
+        flags |= is_set(importFlags, ImportFlags::JoinIdenticalVertices) ? aiProcess_JoinIdenticalVertices : 0;
 
         const aiScene* scene = nullptr;
 
-        if (hasExtension(fullPath, "gz"))
+        if (hasExtension(path, "gz"))
         {
-            auto decompressed = decompressFile(fullPath);
+            auto decompressed = decompressFile(path);
             scene = importer.ReadFileFromMemory(decompressed.data(), decompressed.size(), flags);
         }
         else
         {
-            scene = importer.ReadFile(fullPath.string().c_str(), flags);
+            scene = importer.ReadFile(path.string().c_str(), flags);
         }
 
         if (!scene)
         {
-            logWarning("Failed to load triangle mesh from '{}': {}", fullPath, importer.GetErrorString());
+            logWarning("Failed to load triangle mesh from '{}': {}", path, importer.GetErrorString());
             return nullptr;
         }
 
@@ -260,11 +261,22 @@ namespace Falcor
             for (size_t faceIdx = 0; faceIdx < mesh->mNumFaces; ++faceIdx)
             {
                 const auto& face = mesh->mFaces[faceIdx];
+                if (face.mNumIndices != 3)
+                {
+                    logWarning("Failed to load triangle mesh from '{}': Broken face data", path);
+                    return nullptr;
+                }
                 for (size_t i = 0; i < 3; ++i) indices.emplace_back((uint32_t)(indexBase + face.mIndices[i]));
             }
         }
 
         return create(vertices, indices);
+    }
+
+    ref<TriangleMesh> TriangleMesh::createFromFile(const std::filesystem::path& path, bool smoothNormals)
+    {
+        ImportFlags flags = smoothNormals ? ImportFlags::GenSmoothNormals : ImportFlags::None;
+        return createFromFile(path, flags);
     }
 
     uint32_t TriangleMesh::addVertex(float3 position, float3 normal, float2 texCoord)
@@ -286,18 +298,18 @@ namespace Falcor
         applyTransform(transform.getMatrix());
     }
 
-    void TriangleMesh::applyTransform(const rmcv::mat4& transform)
+    void TriangleMesh::applyTransform(const float4x4& transform)
     {
-        auto invTranspose = (rmcv::mat3)rmcv::transpose(rmcv::inverse(transform));
+        auto invTranspose = float3x3(transpose(inverse(transform)));
 
         for (auto& vertex : mVertices)
         {
-            vertex.position = (transform * float4(vertex.position, 1.f)).xyz;
-            vertex.normal = glm::normalize(invTranspose * vertex.normal);
+            vertex.position = transformPoint(transform, vertex.position);
+            vertex.normal = normalize(transformVector(invTranspose, vertex.normal));
         }
 
         // Check if triangle winding has flipped and adjust winding order accordingly.
-        bool flippedWinding = rmcv::determinant((rmcv::mat3)transform) < 0.f;
+        bool flippedWinding = determinant(float3x3(transform)) < 0.f;
         if (flippedWinding) mFrontFaceCW = !mFrontFaceCW;
     }
 
@@ -314,7 +326,19 @@ namespace Falcor
     {
         using namespace pybind11::literals;
 
-        pybind11::class_<TriangleMesh, TriangleMesh::SharedPtr> triangleMesh(m, "TriangleMesh");
+        pybind11::enum_<TriangleMesh::ImportFlags> flags(m, "TriangleMeshImportFlags");
+        flags.value("Default", TriangleMesh::ImportFlags::Default);
+        flags.value("GenSmoothNormals", TriangleMesh::ImportFlags::GenSmoothNormals);
+        flags.value("JoinIdenticalVertices", TriangleMesh::ImportFlags::JoinIdenticalVertices);
+        ScriptBindings::addEnumBinaryOperators(flags);
+
+        pybind11::class_<TriangleMesh, ref<TriangleMesh>> triangleMesh(m, "TriangleMesh");
+
+        pybind11::class_<TriangleMesh::Vertex> vertex(triangleMesh, "Vertex");
+        vertex.def_readwrite("position", &TriangleMesh::Vertex::position);
+        vertex.def_readwrite("normal", &TriangleMesh::Vertex::normal);
+        vertex.def_readwrite("texCoord", &TriangleMesh::Vertex::texCoord);
+
         triangleMesh.def_property("name", &TriangleMesh::getName, &TriangleMesh::setName);
         triangleMesh.def_property("frontFaceCW", &TriangleMesh::getFrontFaceCW, &TriangleMesh::setFrontFaceCW);
         triangleMesh.def_property_readonly("vertices", &TriangleMesh::getVertices);
@@ -326,11 +350,15 @@ namespace Falcor
         triangleMesh.def_static("createDisk", &TriangleMesh::createDisk, "radius"_a = 1.f, "segments"_a = 32);
         triangleMesh.def_static("createCube", &TriangleMesh::createCube, "size"_a = float3(1.f));
         triangleMesh.def_static("createSphere", &TriangleMesh::createSphere, "radius"_a = 1.f, "segmentsU"_a = 32, "segmentsV"_a = 32);
-        triangleMesh.def_static("createFromFile", &TriangleMesh::createFromFile, "path"_a, "smoothNormals"_a = false);
-
-        pybind11::class_<TriangleMesh::Vertex> vertex(triangleMesh, "Vertex");
-        vertex.def_readwrite("position", &TriangleMesh::Vertex::position);
-        vertex.def_readwrite("normal", &TriangleMesh::Vertex::normal);
-        vertex.def_readwrite("texCoord", &TriangleMesh::Vertex::texCoord);
+        triangleMesh.def_static("createFromFile",
+            [](const std::filesystem::path& path, bool smoothNormals)
+            { return TriangleMesh::createFromFile(getActiveAssetResolver().resolvePath(path), smoothNormals); },
+            "path"_a, "smoothNormals"_a = false
+        ); // PYTHONDEPRECATED
+        triangleMesh.def_static("createFromFile",
+            [](const std::filesystem::path& path, TriangleMesh::ImportFlags importFlags)
+            { return TriangleMesh::createFromFile(getActiveAssetResolver().resolvePath(path), importFlags); },
+            "path"_a, "importFlags"_a
+        ); // PYTHONDEPRECATED
     }
 }

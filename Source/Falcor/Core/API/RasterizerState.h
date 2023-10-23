@@ -28,6 +28,8 @@
 #pragma once
 #include "Handles.h"
 #include "Core/Macros.h"
+#include "Core/Object.h"
+#include "Core/Enum.h"
 #include <memory>
 
 namespace Falcor
@@ -35,11 +37,10 @@ namespace Falcor
 /**
  * Rasterizer state
  */
-class FALCOR_API RasterizerState
+class FALCOR_API RasterizerState : public Object
 {
+    FALCOR_OBJECT(RasterizerState)
 public:
-    using SharedPtr = std::shared_ptr<RasterizerState>;
-
     /**
      * Cull mode
      */
@@ -49,6 +50,15 @@ public:
         Front, ///< Cull front-facing primitives
         Back,  ///< Cull back-facing primitives
     };
+
+    FALCOR_ENUM_INFO(
+        CullMode,
+        {
+            {CullMode::None, "None"},
+            {CullMode::Front, "Front"},
+            {CullMode::Back, "Back"},
+        }
+    );
 
     /**
      * Polygon fill mode
@@ -179,7 +189,7 @@ public:
      * @param[in] desc Rasterizer state descriptor.
      * @return A new object, or throws an exception if creation failed.
      */
-    static SharedPtr create(const Desc& desc);
+    static ref<RasterizerState> create(const Desc& desc);
 
     /**
      * Get the cull mode
@@ -228,4 +238,7 @@ private:
     RasterizerState(const Desc& Desc) : mDesc(Desc) {}
     Desc mDesc;
 };
+
+FALCOR_ENUM_REGISTER(RasterizerState::CullMode);
+
 } // namespace Falcor

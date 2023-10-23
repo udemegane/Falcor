@@ -26,36 +26,37 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #include "GraphicsState.h"
+#include "Core/ObjectPython.h"
 #include "Core/API/Device.h"
 #include "Core/Program/ProgramVars.h"
 #include "Utils/Scripting/ScriptBindings.h"
 
 namespace Falcor
 {
-static GraphicsStateObject::PrimitiveType topology2Type(Vao::Topology t)
+static GraphicsStateObjectDesc::PrimitiveType topology2Type(Vao::Topology t)
 {
     switch (t)
     {
     case Vao::Topology::PointList:
-        return GraphicsStateObject::PrimitiveType::Point;
+        return GraphicsStateObjectDesc::PrimitiveType::Point;
     case Vao::Topology::LineList:
     case Vao::Topology::LineStrip:
-        return GraphicsStateObject::PrimitiveType::Line;
+        return GraphicsStateObjectDesc::PrimitiveType::Line;
     case Vao::Topology::TriangleList:
     case Vao::Topology::TriangleStrip:
-        return GraphicsStateObject::PrimitiveType::Triangle;
+        return GraphicsStateObjectDesc::PrimitiveType::Triangle;
     default:
         FALCOR_UNREACHABLE();
-        return GraphicsStateObject::PrimitiveType::Undefined;
+        return GraphicsStateObjectDesc::PrimitiveType::Undefined;
     }
 }
 
-GraphicsState::SharedPtr GraphicsState::create(std::shared_ptr<Device> pDevice)
+ref<GraphicsState> GraphicsState::create(ref<Device> pDevice)
 {
-    return SharedPtr(new GraphicsState(std::move(pDevice)));
+    return ref<GraphicsState>(new GraphicsState(pDevice));
 }
 
-GraphicsState::GraphicsState(std::shared_ptr<Device> pDevice) : mpDevice(std::move(pDevice))
+GraphicsState::GraphicsState(ref<Device> pDevice) : mpDevice(pDevice)
 {
     uint32_t vpCount = getMaxViewportCount();
 
@@ -69,14 +70,14 @@ GraphicsState::GraphicsState(std::shared_ptr<Device> pDevice) : mpDevice(std::mo
         setViewport(i, mViewports[i], true);
     }
 
-    mpGsoGraph = StateGraph::create();
+    mpGsoGraph = std::make_unique<GraphicsStateGraph>();
 }
 
 GraphicsState::~GraphicsState() = default;
 
-GraphicsStateObject::SharedPtr GraphicsState::getGSO(const GraphicsVars* pVars)
+ref<GraphicsStateObject> GraphicsState::getGSO(const ProgramVars* pVars)
 {
-    auto pProgramKernels = mpProgram ? mpProgram->getActiveVersion()->getKernels(mpDevice.get(), pVars) : nullptr;
+    auto pProgramKernels = mpProgram ? mpProgram->getActiveVersion()->getKernels(mpDevice, pVars) : nullptr;
     bool newProgVersion = pProgramKernels.get() != mCachedData.pProgramKernels;
     if (newProgVersion)
     {
@@ -91,15 +92,15 @@ GraphicsStateObject::SharedPtr GraphicsState::getGSO(const GraphicsVars* pVars)
         mCachedData.pFboDesc = pFboDesc;
     }
 
-    GraphicsStateObject::SharedPtr pGso = mpGsoGraph->getCurrentNode();
+    ref<GraphicsStateObject> pGso = mpGsoGraph->getCurrentNode();
     if (pGso == nullptr)
     {
-        mDesc.setProgramKernels(pProgramKernels);
-        mDesc.setFboFormats(mpFbo ? mpFbo->getDesc() : Fbo::Desc());
-        mDesc.setVertexLayout(mpVao->getVertexLayout());
-        mDesc.setPrimitiveType(topology2Type(mpVao->getPrimitiveTopology()));
+        mDesc.pProgramKernels = pProgramKernels;
+        mDesc.fboDesc = mpFbo ? mpFbo->getDesc() : Fbo::Desc();
+        mDesc.pVertexLayout = mpVao->getVertexLayout();
+        mDesc.primitiveType = topology2Type(mpVao->getPrimitiveTopology());
 
-        StateGraph::CompareFunc cmpFunc = [&desc = mDesc](GraphicsStateObject::SharedPtr pGso) -> bool
+        GraphicsStateGraph::CompareFunc cmpFunc = [&desc = mDesc](ref<GraphicsStateObject> pGso) -> bool
         { return pGso && (desc == pGso->getDesc()); };
 
         if (mpGsoGraph->scanForMatchingNode(cmpFunc))
@@ -108,14 +109,15 @@ GraphicsStateObject::SharedPtr GraphicsState::getGSO(const GraphicsVars* pVars)
         }
         else
         {
-            pGso = GraphicsStateObject::create(mpDevice.get(), mDesc);
+            pGso = mpDevice->createGraphicsStateObject(mDesc);
+            pGso->breakStrongReferenceToDevice();
             mpGsoGraph->setCurrentNodeData(pGso);
         }
     }
     return pGso;
 }
 
-GraphicsState& GraphicsState::setFbo(const Fbo::SharedPtr& pFbo, bool setVp0Sc0)
+GraphicsState& GraphicsState::setFbo(const ref<Fbo>& pFbo, bool setVp0Sc0)
 {
     mpFbo = pFbo;
 
@@ -129,7 +131,7 @@ GraphicsState& GraphicsState::setFbo(const Fbo::SharedPtr& pFbo, bool setVp0Sc0)
     return *this;
 }
 
-void GraphicsState::pushFbo(const Fbo::SharedPtr& pFbo, bool setVp0Sc0)
+void GraphicsState::pushFbo(const ref<Fbo>& pFbo, bool setVp0Sc0)
 {
     mFboStack.push(mpFbo);
     setFbo(pFbo, setVp0Sc0);
@@ -137,13 +139,13 @@ void GraphicsState::pushFbo(const Fbo::SharedPtr& pFbo, bool setVp0Sc0)
 
 void GraphicsState::popFbo(bool setVp0Sc0)
 {
-    checkInvariant(!mFboStack.empty(), "Empty stack.");
+    FALCOR_CHECK(!mFboStack.empty(), "Empty stack.");
 
     setFbo(mFboStack.top(), setVp0Sc0);
     mFboStack.pop();
 }
 
-GraphicsState& GraphicsState::setVao(const Vao::SharedConstPtr& pVao)
+GraphicsState& GraphicsState::setVao(const ref<Vao>& pVao)
 {
     if (mpVao != pVao)
     {
@@ -153,21 +155,21 @@ GraphicsState& GraphicsState::setVao(const Vao::SharedConstPtr& pVao)
     return *this;
 }
 
-GraphicsState& GraphicsState::setBlendState(BlendState::SharedPtr pBlendState)
+GraphicsState& GraphicsState::setBlendState(ref<BlendState> pBlendState)
 {
-    if (mDesc.getBlendState() != pBlendState)
+    if (mDesc.pBlendState != pBlendState)
     {
-        mDesc.setBlendState(pBlendState);
+        mDesc.pBlendState = pBlendState;
         mpGsoGraph->walk((void*)pBlendState.get());
     }
     return *this;
 }
 
-GraphicsState& GraphicsState::setRasterizerState(RasterizerState::SharedPtr pRasterizerState)
+GraphicsState& GraphicsState::setRasterizerState(ref<RasterizerState> pRasterizerState)
 {
-    if (mDesc.getRasterizerState() != pRasterizerState)
+    if (mDesc.pRasterizerState != pRasterizerState)
     {
-        mDesc.setRasterizerState(pRasterizerState);
+        mDesc.pRasterizerState = pRasterizerState;
         mpGsoGraph->walk((void*)pRasterizerState.get());
     }
     return *this;
@@ -175,19 +177,19 @@ GraphicsState& GraphicsState::setRasterizerState(RasterizerState::SharedPtr pRas
 
 GraphicsState& GraphicsState::setSampleMask(uint32_t sampleMask)
 {
-    if (mDesc.getSampleMask() != sampleMask)
+    if (mDesc.sampleMask != sampleMask)
     {
-        mDesc.setSampleMask(sampleMask);
+        mDesc.sampleMask = sampleMask;
         mpGsoGraph->walk((void*)(uint64_t)sampleMask);
     }
     return *this;
 }
 
-GraphicsState& GraphicsState::setDepthStencilState(DepthStencilState::SharedPtr pDepthStencilState)
+GraphicsState& GraphicsState::setDepthStencilState(ref<DepthStencilState> pDepthStencilState)
 {
-    if (mDesc.getDepthStencilState() != pDepthStencilState)
+    if (mDesc.pDepthStencilState != pDepthStencilState)
     {
-        mDesc.setDepthStencilState(pDepthStencilState);
+        mDesc.pDepthStencilState = pDepthStencilState;
         mpGsoGraph->walk((void*)pDepthStencilState.get());
     }
     return *this;
@@ -195,7 +197,7 @@ GraphicsState& GraphicsState::setDepthStencilState(DepthStencilState::SharedPtr 
 
 void GraphicsState::pushViewport(uint32_t index, const GraphicsState::Viewport& vp, bool setScissors)
 {
-    checkArgument(index < mVpStack.size(), "'index' is out of range.");
+    FALCOR_CHECK(index < mVpStack.size(), "'index' is out of range.");
 
     mVpStack[index].push(mViewports[index]);
     setViewport(index, vp, setScissors);
@@ -203,8 +205,8 @@ void GraphicsState::pushViewport(uint32_t index, const GraphicsState::Viewport& 
 
 void GraphicsState::popViewport(uint32_t index, bool setScissors)
 {
-    checkArgument(index < mVpStack.size(), "'index' is out of range.");
-    checkInvariant(!mVpStack[index].empty(), "Empty stack.");
+    FALCOR_CHECK(index < mVpStack.size(), "'index' is out of range.");
+    FALCOR_CHECK(!mVpStack[index].empty(), "Empty stack.");
 
     const auto& VP = mVpStack[index].top();
     setViewport(index, VP, setScissors);
@@ -213,7 +215,7 @@ void GraphicsState::popViewport(uint32_t index, bool setScissors)
 
 void GraphicsState::pushScissors(uint32_t index, const GraphicsState::Scissor& sc)
 {
-    checkArgument(index < mScStack.size(), "'index' is out of range.");
+    FALCOR_CHECK(index < mScStack.size(), "'index' is out of range.");
 
     mScStack[index].push(mScissors[index]);
     setScissors(index, sc);
@@ -221,8 +223,8 @@ void GraphicsState::pushScissors(uint32_t index, const GraphicsState::Scissor& s
 
 void GraphicsState::popScissors(uint32_t index)
 {
-    checkArgument(index < mScStack.size(), "'index' is out of range.");
-    checkInvariant(!mScStack[index].empty(), "Empty stack.");
+    FALCOR_CHECK(index < mScStack.size(), "'index' is out of range.");
+    FALCOR_CHECK(!mScStack[index].empty(), "Empty stack.");
 
     const auto& sc = mScStack[index].top();
     setScissors(index, sc);
@@ -249,8 +251,13 @@ void GraphicsState::setScissors(uint32_t index, const GraphicsState::Scissor& sc
     mScissors[index] = sc;
 }
 
+void GraphicsState::breakStrongReferenceToDevice()
+{
+    mpDevice.breakStrongReference();
+}
+
 FALCOR_SCRIPT_BINDING(GraphicsState)
 {
-    pybind11::class_<GraphicsState, GraphicsState::SharedPtr>(m, "GraphicsState");
+    pybind11::class_<GraphicsState, ref<GraphicsState>>(m, "GraphicsState");
 }
 } // namespace Falcor

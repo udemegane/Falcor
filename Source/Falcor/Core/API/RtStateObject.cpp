@@ -28,17 +28,12 @@
 #include "RtStateObject.h"
 #include "Device.h"
 #include "GFXAPI.h"
-#include "Core/Program/RtProgram.h"
+#include "Core/Program/Program.h"
 
 namespace Falcor
 {
 
-RtStateObject::SharedPtr RtStateObject::create(Device* pDevice, const Desc& desc)
-{
-    return SharedPtr(new RtStateObject(pDevice->shared_from_this(), desc));
-}
-
-RtStateObject::RtStateObject(std::shared_ptr<Device> pDevice, const Desc& desc) : mpDevice(std::move(pDevice)), mDesc(desc)
+RtStateObject::RtStateObject(ref<Device> pDevice, const RtStateObjectDesc& desc) : mpDevice(pDevice), mDesc(desc)
 {
     auto pKernels = getKernels();
     gfx::RayTracingPipelineStateDesc rtpDesc = {};
@@ -48,14 +43,14 @@ RtStateObject::RtStateObject(std::shared_ptr<Device> pDevice, const Desc& desc) 
     {
         if (pEntryPointGroup->getType() == EntryPointGroupKernels::Type::RtHitGroup)
         {
-            const Shader* pIntersection = pEntryPointGroup->getShader(ShaderType::Intersection);
-            const Shader* pAhs = pEntryPointGroup->getShader(ShaderType::AnyHit);
-            const Shader* pChs = pEntryPointGroup->getShader(ShaderType::ClosestHit);
+            const EntryPointKernel* pIntersection = pEntryPointGroup->getKernel(ShaderType::Intersection);
+            const EntryPointKernel* pAhs = pEntryPointGroup->getKernel(ShaderType::AnyHit);
+            const EntryPointKernel* pChs = pEntryPointGroup->getKernel(ShaderType::ClosestHit);
 
             gfx::HitGroupDesc hitgroupDesc = {};
-            hitgroupDesc.anyHitEntryPoint = pAhs ? pAhs->getEntryPoint().c_str() : nullptr;
-            hitgroupDesc.closestHitEntryPoint = pChs ? pChs->getEntryPoint().c_str() : nullptr;
-            hitgroupDesc.intersectionEntryPoint = pIntersection ? pIntersection->getEntryPoint().c_str() : nullptr;
+            hitgroupDesc.anyHitEntryPoint = pAhs ? pAhs->getEntryPointName().c_str() : nullptr;
+            hitgroupDesc.closestHitEntryPoint = pChs ? pChs->getEntryPointName().c_str() : nullptr;
+            hitgroupDesc.intersectionEntryPoint = pIntersection ? pIntersection->getEntryPointName().c_str() : nullptr;
             hitgroupDesc.hitGroupName = pEntryPointGroup->getExportName().c_str();
             hitGroups.push_back(hitgroupDesc);
         }
@@ -69,11 +64,11 @@ RtStateObject::RtStateObject(std::shared_ptr<Device> pDevice, const Desc& desc) 
     static_assert((uint32_t)gfx::RayTracingPipelineFlags::SkipTriangles == (uint32_t)RtPipelineFlags::SkipTriangles);
 
     rtpDesc.flags = (gfx::RayTracingPipelineFlags::Enum)mDesc.pipelineFlags;
-    auto rtProgram = std::dynamic_pointer_cast<RtProgram>(mDesc.pKernels->getProgramVersion()->getProgram());
+    auto rtProgram = dynamic_cast<Program*>(mDesc.pProgramKernels->getProgramVersion()->getProgram());
     FALCOR_ASSERT(rtProgram);
-    rtpDesc.maxRayPayloadSize = rtProgram->getRtDesc().getMaxPayloadSize();
-    rtpDesc.maxAttributeSizeInBytes = rtProgram->getRtDesc().getMaxAttributeSize();
-    rtpDesc.program = mDesc.pKernels->getGfxProgram();
+    rtpDesc.maxRayPayloadSize = rtProgram->getDesc().maxPayloadSize;
+    rtpDesc.maxAttributeSizeInBytes = rtProgram->getDesc().maxAttributeSize;
+    rtpDesc.program = mDesc.pProgramKernels->getGfxProgram();
 
     FALCOR_GFX_CALL(mpDevice->getGfxDevice()->createRayTracingPipelineState(rtpDesc, mGfxPipelineState.writeRef()));
 
@@ -84,4 +79,10 @@ RtStateObject::RtStateObject(std::shared_ptr<Device> pDevice, const Desc& desc) 
         mEntryPointGroupExportNames.push_back(pEntryPointGroup->getExportName());
     }
 }
+
+RtStateObject::~RtStateObject()
+{
+    mpDevice->releaseResource(mGfxPipelineState);
+}
+
 } // namespace Falcor

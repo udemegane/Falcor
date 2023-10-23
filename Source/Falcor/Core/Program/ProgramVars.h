@@ -36,8 +36,7 @@
 
 namespace Falcor
 {
-class GraphicsProgram;
-class ComputeProgram;
+class Program;
 class ComputeContext;
 
 /**
@@ -48,72 +47,31 @@ class ComputeContext;
 class FALCOR_API ProgramVars : public ParameterBlock
 {
 public:
-    using SharedPtr = ParameterBlockSharedPtr<ProgramVars>;
+    /**
+     * Create a new graphics vars object.
+     * @param[in] pDevice GPU device.
+     * @param[in] pReflector A program reflection object containing the requested declarations.
+     * @return A new object, or an exception is thrown if creation failed.
+     */
+    static ref<ProgramVars> create(ref<Device> pDevice, const ref<const ProgramReflection>& pReflector);
+
+    /**
+     * Create a new graphics vars object.
+     * @param[in] pDevice GPU device.
+     * @param[in] pProg A program containing the requested declarations. The active version of the program is used.
+     * @return A new object, or an exception is thrown if creation failed.
+     */
+    static ref<ProgramVars> create(ref<Device> pDevice, const Program* pProg);
 
     /**
      * Get the program reflection interface
      */
-    const ProgramReflection::SharedConstPtr& getReflection() const { return mpReflector; }
+    const ref<const ProgramReflection>& getReflection() const { return mpReflector; }
 
 protected:
-    ProgramVars(std::shared_ptr<Device> pDevice, const ProgramReflection::SharedConstPtr& pReflector);
+    ProgramVars(ref<Device> pDevice, const ref<const ProgramReflection>& pReflector);
 
-    ProgramReflection::SharedConstPtr mpReflector;
-};
-
-class FALCOR_API GraphicsVars : public ProgramVars
-{
-public:
-    using SharedPtr = ParameterBlockSharedPtr<GraphicsVars>;
-
-    /**
-     * Create a new graphics vars object.
-     * @param[in] pDevice GPU device.
-     * @param[in] pReflector A program reflection object containing the requested declarations.
-     * @return A new object, or an exception is thrown if creation failed.
-     */
-    static SharedPtr create(std::shared_ptr<Device> pDevice, const ProgramReflection::SharedConstPtr& pReflector);
-
-    /**
-     * Create a new graphics vars object.
-     * @param[in] pDevice GPU device.
-     * @param[in] pProg A program containing the requested declarations. The active version of the program is used.
-     * @return A new object, or an exception is thrown if creation failed.
-     */
-    static SharedPtr create(std::shared_ptr<Device> pDevice, const GraphicsProgram* pProg);
-
-protected:
-    GraphicsVars(std::shared_ptr<Device> pDevice, const ProgramReflection::SharedConstPtr& pReflector);
-};
-
-class FALCOR_API ComputeVars : public ProgramVars
-{
-public:
-    using SharedPtr = ParameterBlockSharedPtr<ComputeVars>;
-
-    /**
-     * Create a new compute vars object.
-     * @param[in] pDevice GPU device.
-     * @param[in] pReflector A program reflection object containing the requested declarations.
-     * @return A new object, or an exception is thrown if creation failed.
-     */
-    static SharedPtr create(std::shared_ptr<Device> pDevice, const ProgramReflection::SharedConstPtr& pReflector);
-
-    /**
-     * Create a new compute vars object.
-     * @param[in] pDevice GPU device.
-     * @param[in] pProg A program containing the requested declarations. The active version of the program is used.
-     * @return A new object, or an exception is thrown if creation failed.
-     */
-    static SharedPtr create(std::shared_ptr<Device> pDevice, const ComputeProgram* pProg);
-
-    /**
-     * Dispatch the program using the argument values set in this object.
-     */
-    void dispatchCompute(ComputeContext* pContext, uint3 const& threadGroupCount);
-
-protected:
-    ComputeVars(std::shared_ptr<Device> pDevice, const ProgramReflection::SharedConstPtr& pReflector);
+    ref<const ProgramReflection> mpReflector;
 };
 
 class RtStateObject;
@@ -124,8 +82,6 @@ class RtStateObject;
 class FALCOR_API RtProgramVars : public ProgramVars
 {
 public:
-    using SharedPtr = ParameterBlockSharedPtr<RtProgramVars>;
-
     /**
      * Create a new ray tracing vars object.
      * @param[in] pDevice GPU device.
@@ -133,11 +89,7 @@ public:
      * @param[in] pBindingTable The raytracing binding table.
      * @return A new object, or an exception is thrown if creation failed.
      */
-    static SharedPtr create(
-        std::shared_ptr<Device> pDevice,
-        const RtProgram::SharedPtr& pProgram,
-        const RtBindingTable::SharedPtr& pBindingTable
-    );
+    static ref<RtProgramVars> create(ref<Device> pDevice, const ref<Program>& pProgram, const ref<RtBindingTable>& pBindingTable);
 
     bool prepareShaderTable(RenderContext* pCtx, RtStateObject* pRtso);
 
@@ -157,9 +109,9 @@ private:
 
     using VarsVector = std::vector<EntryPointGroupInfo>;
 
-    RtProgramVars(std::shared_ptr<Device> pDevice, const RtProgram::SharedPtr& pProgram, const RtBindingTable::SharedPtr& pBindingTable);
+    RtProgramVars(ref<Device> pDevice, const ref<Program>& pProgram, const ref<RtBindingTable>& pBindingTable);
 
-    void init(const RtBindingTable::SharedPtr& pBindingTable);
+    void init(const ref<RtBindingTable>& pBindingTable);
 
     uint32_t mRayTypeCount = 0;                         ///< Number of ray types (= number of hit groups per geometry).
     uint32_t mGeometryCount = 0;                        ///< Number of geometries.

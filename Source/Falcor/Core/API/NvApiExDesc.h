@@ -27,7 +27,7 @@
  **************************************************************************/
 #pragma once
 #include "Core/Macros.h"
-#include "Core/Assert.h"
+#include "Core/Error.h"
 #include "Core/Program/ProgramVersion.h"
 #if FALCOR_HAS_NVAPI
 #include <d3d12.h>
@@ -95,7 +95,7 @@ inline void createNvApiUavSlotExDesc(NvApiPsoExDesc& ret, uint32_t uavSlot)
     desc.registerSpace = 0; // SM5.1+: If the "space" keyword is omitted, the default space index of 0 is implicitly assigned
 }
 
-inline std::optional<uint32_t> findNvApiShaderRegister(ProgramKernels::SharedConstPtr const& pKernels)
+inline std::optional<uint32_t> findNvApiShaderRegister(const ref<const ProgramKernels>& pKernels)
 {
     auto pBlock = pKernels->getReflector()->getDefaultParameterBlock();
     auto pVar = pBlock->getResource("g_NvidiaExt");
@@ -116,7 +116,7 @@ inline void createNvApiUavSlotExDesc(NvApiPsoExDesc& ret, uint32_t uavSlot)
 {
     FALCOR_UNREACHABLE();
 }
-inline std::optional<uint32_t> findNvApiShaderRegister(ProgramKernels::SharedConstPtr const& pKernels, uint32_t& outRegisterIndex)
+inline std::optional<uint32_t> findNvApiShaderRegister(const ref<const ProgramKernels>& pKernels, uint32_t& outRegisterIndex)
 {
     return std::optional<uint32_t>();
 }

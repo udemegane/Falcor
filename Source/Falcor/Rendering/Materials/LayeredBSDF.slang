@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -167,6 +167,11 @@ struct LayeredBSDF : IBSDF
 
     bool sample<S : ISampleGenerator>(const float3 wi, out float3 wo, out float pdfOut, out float3 weightOut, out uint lobeType, inout S sg)
     {
+        wo = {};
+        pdfOut = {};
+        weightOut = {};
+        lobeType = {};
+
         bool enterTop = wi.z > 0.0f;
 
         BSDFSample bs;

@@ -29,7 +29,7 @@
 
 #include "Core/Macros.h"
 #include "Core/API/Buffer.h"
-#include "Core/API/GpuFence.h"
+#include "Core/API/Fence.h"
 
 #include <filesystem>
 #include <vector>
@@ -53,14 +53,14 @@ public:
      * @param[in] pDevice GPU device.
      * @param[in] binCount Number of profiling bins.
      */
-    WarpProfiler(Device* pDevice, const uint32_t binCount);
+    WarpProfiler(ref<Device> pDevice, const uint32_t binCount);
 
     /**
      * @brief Binds the profiler data to shader vars.
      * This function must be called before the profiler can be used.
      * @param[in] var Shader vars of the program to set data into.
      */
-    void setShaderData(const ShaderVar& var) const;
+    void bindShaderData(const ShaderVar& var) const;
 
     /**
      * @brief Begin profiling.
@@ -93,9 +93,9 @@ public:
 private:
     void readBackData();
 
-    GpuFence::SharedPtr mpFence;
-    Buffer::SharedPtr mpHistogramBuffer;
-    Buffer::SharedPtr mpHistogramStagingBuffer;
+    ref<Fence> mpFence;
+    ref<Buffer> mpHistogramBuffer;
+    ref<Buffer> mpHistogramStagingBuffer;
 
     const uint32_t mBinCount;          ///< Number of profiling bins.
     std::vector<uint32_t> mHistograms; ///< Histograms for all profiling bins.

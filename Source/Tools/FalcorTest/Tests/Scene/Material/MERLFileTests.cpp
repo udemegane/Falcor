@@ -26,6 +26,7 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #include "Testing/UnitTest.h"
+#include "Core/AssetResolver.h"
 #include "Scene/Material/MERLFile.h"
 #include "Scene/Material/MERLMaterialData.slang"
 
@@ -33,13 +34,11 @@ namespace Falcor
 {
 GPU_TEST(MERLFile)
 {
-    const std::filesystem::path path = "TestScenes/Materials/Data/gray-lambert.binary";
-
-    std::filesystem::path fullPath;
-    ASSERT(findFileInDataDirectories(path, fullPath));
+    // TODO: This is not ideal, we should only access files in the runtime directory.
+    const std::filesystem::path path = getProjectDirectory() / "media/test_scenes/materials/data/gray-lambert.binary";
 
     MERLFile merlFile;
-    bool result = merlFile.loadBRDF(fullPath);
+    bool result = merlFile.loadBRDF(path);
     ASSERT(result);
 
     const auto desc = merlFile.getDesc();
@@ -50,7 +49,7 @@ GPU_TEST(MERLFile)
 
     const float3 expected = float3(0.5f);
     auto lut = merlFile.prepareAlbedoLUT(ctx.getDevice());
-    EXPECT_EQ(lut.size(), (size_t)MERLMaterialData::kAlbedoLUTSize);
+    EXPECT_EQ(lut.size(), MERLMaterialData::kAlbedoLUTSize);
     for (auto v : lut)
     {
         EXPECT_EQ(v.x, expected.x);

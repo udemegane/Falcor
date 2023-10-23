@@ -34,30 +34,33 @@ namespace Falcor
 {
 namespace
 {
-std::vector<std::string> kShaderModels = {
-    {"6_2"},
-    {"6_3"},
+std::vector<ShaderModel> kShaderModels = {
+    {ShaderModel::SM6_2},
+    {ShaderModel::SM6_3},
 };
 
 const uint32_t kNumElems = 256;
 std::mt19937 r;
 std::uniform_real_distribution u;
 
-void test(GPUUnitTestContext& ctx, const std::string& shaderModel, bool useUav)
+void test(GPUUnitTestContext& ctx, ShaderModel shaderModel, bool useUav)
 {
-    Device* pDevice = ctx.getDevice().get();
+    ref<Device> pDevice = ctx.getDevice();
 
-    Program::DefineList defines = {{"USE_UAV", useUav ? "1" : "0"}};
+    DefineList defines = {{"USE_UAV", useUav ? "1" : "0"}};
 
-    ctx.createProgram("Tests/Slang/Float64Tests.cs.slang", "testFloat64", defines, Shader::CompilerFlags::None, shaderModel);
+    ctx.createProgram("Tests/Slang/Float64Tests.cs.slang", "testFloat64", defines, SlangCompilerFlags::None, shaderModel);
     ctx.allocateStructuredBuffer("result", kNumElems);
 
     std::vector<uint64_t> elems(kNumElems);
     for (auto& v : elems)
         v = fstd::bit_cast<uint64_t>(u(r));
     auto var = ctx.vars().getRootVar();
-    auto pBuf = Buffer::createStructured(
-        pDevice, var["data"], kNumElems, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None,
+    auto pBuf = pDevice->createStructuredBuffer(
+        var["data"],
+        kNumElems,
+        ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+        MemoryType::DeviceLocal,
         elems.data()
     );
     var["data"] = pBuf;
@@ -65,12 +68,11 @@ void test(GPUUnitTestContext& ctx, const std::string& shaderModel, bool useUav)
     ctx.runProgram(kNumElems, 1, 1);
 
     // Verify results.
-    const uint64_t* result = ctx.mapBuffer<const uint64_t>("result");
+    std::vector<uint64_t> result = ctx.readBuffer<uint64_t>("result");
     for (uint32_t i = 0; i < kNumElems; i++)
     {
-        EXPECT_EQ(result[i], elems[i]) << "i = " << i << " shaderModel=" << shaderModel;
+        EXPECT_EQ(result[i], elems[i]) << "i = " << i << " shaderModel=" << enumToString(shaderModel);
     }
-    ctx.unmapBuffer("result");
 }
 } // namespace
 

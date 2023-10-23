@@ -30,7 +30,7 @@
 
 BEGIN_NAMESPACE_FALCOR
 
-/** Struct representing a material texture handle.
+/** Struct representing a material texture handle on the GPU.
 
     A texture handle can be in different modes:
     - 'Uniform' handle refers to a constant value.
@@ -51,12 +51,19 @@ struct TextureHandle
         Count // Must be last
     };
 
-    static const uint kTextureIDBits = 29;
-    static const uint kModeBits = 2;
-    static const uint kUdimEnabledBits = 1;
+    static constexpr uint kTextureIDBits = 29;
+    static constexpr uint kModeBits = 2;
+    static constexpr uint kUdimEnabledBits = 1;
 
-    static const uint kModeOffset = kTextureIDBits;
-    static const uint kUdimEnabledOffset = kModeOffset + kModeBits;
+    static constexpr uint kModeOffset = kTextureIDBits;
+    static constexpr uint kUdimEnabledOffset = kModeOffset + kModeBits;
+
+#ifdef HOST_CODE
+    TextureHandle() = default;
+    explicit TextureHandle(uint32_t packedData_) : packedData(packedData_) {}
+#else
+    __init(uint32_t packedData) { this.packedData = packedData; }
+#endif
 
     /** Set mode.
     */
@@ -80,7 +87,7 @@ struct TextureHandle
 
     /** Set whether the texture uses udim or not.
      */
-    bool getUdimEnabled() { return IS_BIT_SET(packedData, kUdimEnabledOffset); }
+    bool getUdimEnabled() CONST_FUNCTION { return IS_BIT_SET(packedData, kUdimEnabledOffset); }
 
 #ifdef HOST_CODE
     bool operator==(const TextureHandle& rhs) const { return packedData == rhs.packedData; }

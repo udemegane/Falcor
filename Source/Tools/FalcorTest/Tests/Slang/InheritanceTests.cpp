@@ -61,11 +61,13 @@ std::uniform_int_distribution ui;
 
 GPU_TEST(Inheritance_ManualCreate)
 {
-    Device* pDevice = ctx.getDevice().get();
+    ref<Device> pDevice = ctx.getDevice();
 
-    Program::DefineList defines;
+    DefineList defines;
     defines.add("NUM_TESTS", std::to_string(kNumTests));
-    ctx.createProgram("Tests/Slang/InheritanceTests.cs.slang", "testInheritanceManual", defines, Shader::CompilerFlags::None, "6_5");
+    ctx.createProgram(
+        "Tests/Slang/InheritanceTests.cs.slang", "testInheritanceManual", defines, SlangCompilerFlags::None, ShaderModel::SM6_5
+    );
     ctx.allocateStructuredBuffer("resultsInt", kNumTests);
     ctx.allocateStructuredBuffer("resultsFloat", kNumTests);
 
@@ -86,43 +88,41 @@ GPU_TEST(Inheritance_ManualCreate)
     }
 
     auto var = ctx.vars().getRootVar();
-    var["testType"] = Buffer::createStructured(
-        pDevice, var["testType"], (uint32_t)testType.size(), ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, testType.data()
+    var["testType"] = pDevice->createStructuredBuffer(
+        var["testType"], (uint32_t)testType.size(), ResourceBindFlags::ShaderResource, MemoryType::DeviceLocal, testType.data()
     );
-    var["testValue"] = Buffer::createStructured(
-        pDevice, var["testValue"], (uint32_t)testValue.size(), ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, testValue.data()
+    var["testValue"] = pDevice->createStructuredBuffer(
+        var["testValue"], (uint32_t)testValue.size(), ResourceBindFlags::ShaderResource, MemoryType::DeviceLocal, testValue.data()
     );
-    var["data"] = Buffer::createStructured(
-        pDevice, var["data"], (uint32_t)testType.size(), ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, data.data()
+    var["data"] = pDevice->createStructuredBuffer(
+        var["data"], (uint32_t)testType.size(), ResourceBindFlags::ShaderResource, MemoryType::DeviceLocal, data.data()
     );
 
     ctx.runProgram(kNumTests, 1, 1);
 
     // Verify results.
-    const int* resultsInt = ctx.mapBuffer<const int>("resultsInt");
-    const float2* resultsFloat = ctx.mapBuffer<const float2>("resultsFloat");
+    std::vector<int> resultsInt = ctx.readBuffer<int>("resultsInt");
+    std::vector<float2> resultsFloat = ctx.readBuffer<float2>("resultsFloat");
     for (uint32_t i = 0; i < kNumTests; i++)
     {
         const auto expected = getCpuResult(testType[i], testValue[i], data[i]);
         EXPECT_EQ(resultsInt[i], expected.first) << "i = " << i;
         EXPECT_EQ(resultsFloat[i], expected.second) << "i = " << i;
     }
-    ctx.unmapBuffer("resultsInt");
-    ctx.unmapBuffer("resultsFloat");
 }
 
 GPU_TEST(Inheritance_ConformanceCreate)
 {
-    Device* pDevice = ctx.getDevice().get();
+    ref<Device> pDevice = ctx.getDevice();
 
-    Program::DefineList defines;
+    DefineList defines;
     defines.add("NUM_TESTS", std::to_string(kNumTests));
-    Program::Desc desc;
+    ProgramDesc desc;
     desc.addShaderLibrary("Tests/Slang/InheritanceTests.cs.slang");
     desc.csEntry("testInheritanceConformance");
-    desc.setShaderModel("6_5");
+    desc.setShaderModel(ShaderModel::SM6_5);
 
-    Program::TypeConformanceList typeConformancess{
+    TypeConformanceList typeConformancess{
         {{"TestV0SubNeg", "ITestInterface"}, 0},
         {{"TestV1DefDef", "ITestInterface"}, 1},
         {{"TestV2DefNeg", "ITestInterface"}, 2},
@@ -151,38 +151,36 @@ GPU_TEST(Inheritance_ConformanceCreate)
     }
 
     auto var = ctx.vars().getRootVar();
-    var["testType"] = Buffer::createStructured(
-        pDevice, var["testType"], (uint32_t)testType.size(), ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, testType.data()
+    var["testType"] = pDevice->createStructuredBuffer(
+        var["testType"], (uint32_t)testType.size(), ResourceBindFlags::ShaderResource, MemoryType::DeviceLocal, testType.data()
     );
-    var["testValue"] = Buffer::createStructured(
-        pDevice, var["testValue"], (uint32_t)testValue.size(), ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, testValue.data()
+    var["testValue"] = pDevice->createStructuredBuffer(
+        var["testValue"], (uint32_t)testValue.size(), ResourceBindFlags::ShaderResource, MemoryType::DeviceLocal, testValue.data()
     );
-    var["data"] = Buffer::createStructured(
-        pDevice, var["data"], (uint32_t)testType.size(), ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, data.data()
+    var["data"] = pDevice->createStructuredBuffer(
+        var["data"], (uint32_t)testType.size(), ResourceBindFlags::ShaderResource, MemoryType::DeviceLocal, data.data()
     );
 
     ctx.runProgram(kNumTests, 1, 1);
 
     // Verify results.
-    const int* resultsInt = ctx.mapBuffer<const int>("resultsInt");
-    const float2* resultsFloat = ctx.mapBuffer<const float2>("resultsFloat");
+    std::vector<int> resultsInt = ctx.readBuffer<int>("resultsInt");
+    std::vector<float2> resultsFloat = ctx.readBuffer<float2>("resultsFloat");
     for (uint32_t i = 0; i < kNumTests; i++)
     {
         const auto expected = getCpuResult(testType[i], testValue[i], data[i]);
         EXPECT_EQ(resultsInt[i], expected.first) << "i = " << i;
         EXPECT_EQ(resultsFloat[i], expected.second) << "i = " << i;
     }
-    ctx.unmapBuffer("resultsInt");
-    ctx.unmapBuffer("resultsFloat");
 }
 /// This correctly and reliably fails, but there is no way to automatically test it.
 // GPU_TEST(Inheritance_CheckInvalid)
 // {
-//     Program::DefineList defines;
+//     DefineList defines;
 //     defines.add("NUM_TESTS", std::to_string(kNumTests));
 //     defines.add("COMPILE_WITH_ERROR", "1");
 
-//     ctx.createProgram("Tests/Slang/InheritanceTests.cs.slang", "testInheritance", defines, Shader::CompilerFlags::None, "6_5");
+//     ctx.createProgram("Tests/Slang/InheritanceTests.cs.slang", "testInheritance", defines, SlangCompilerFlags::None, ShaderModel::SM6_5);
 // }
 
 } // namespace Falcor

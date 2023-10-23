@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -35,103 +35,92 @@
 #include "Utils/SampleGenerators/HaltonSamplePattern.h"
 #include "Utils/SampleGenerators/StratifiedSamplePattern.h"
 
-static void registerBindings(pybind11::module& m)
-{
-    pybind11::enum_<GBufferBase::SamplePattern> samplePattern(m, "SamplePattern");
-    samplePattern.value("Center", GBufferBase::SamplePattern::Center);
-    samplePattern.value("DirectX", GBufferBase::SamplePattern::DirectX);
-    samplePattern.value("Halton", GBufferBase::SamplePattern::Halton);
-    samplePattern.value("Stratified", GBufferBase::SamplePattern::Stratified);
-}
-
 extern "C" FALCOR_API_EXPORT void registerPlugin(Falcor::PluginRegistry& registry)
 {
     registry.registerClass<RenderPass, GBufferRaster>();
     registry.registerClass<RenderPass, GBufferRT>();
     registry.registerClass<RenderPass, VBufferRaster>();
     registry.registerClass<RenderPass, VBufferRT>();
-
-    Falcor::ScriptBindings::registerBinding(registerBindings);
 }
 
 namespace
 {
-    // Scripting options.
-    const char kOutputSize[] = "outputSize";
-    const char kFixedOutputSize[] = "fixedOutputSize";
-    const char kSamplePattern[] = "samplePattern";
-    const char kSampleCount[] = "sampleCount";
-    const char kUseAlphaTest[] = "useAlphaTest";
-    const char kDisableAlphaTest[] = "disableAlphaTest"; ///< Deprecated for "useAlphaTest".
-    const char kAdjustShadingNormals[] = "adjustShadingNormals";
-    const char kForceCullMode[] = "forceCullMode";
-    const char kCullMode[] = "cull";
+// Scripting options.
+const char kOutputSize[] = "outputSize";
+const char kFixedOutputSize[] = "fixedOutputSize";
+const char kSamplePattern[] = "samplePattern";
+const char kSampleCount[] = "sampleCount";
+const char kUseAlphaTest[] = "useAlphaTest";
+const char kDisableAlphaTest[] = "disableAlphaTest"; ///< Deprecated for "useAlphaTest".
+const char kAdjustShadingNormals[] = "adjustShadingNormals";
+const char kForceCullMode[] = "forceCullMode";
+const char kCullMode[] = "cull";
+} // namespace
 
-    // UI variables.
-    const Gui::DropdownList kSamplePatternList =
-    {
-        { (uint32_t)GBufferBase::SamplePattern::Center, "Center" },
-        { (uint32_t)GBufferBase::SamplePattern::DirectX, "DirectX" },
-        { (uint32_t)GBufferBase::SamplePattern::Halton, "Halton" },
-        { (uint32_t)GBufferBase::SamplePattern::Stratified, "Stratified" },
-    };
-
-    const Gui::DropdownList kCullModeList =
-    {
-        { (uint32_t)RasterizerState::CullMode::None, "None" },
-        { (uint32_t)RasterizerState::CullMode::Back, "Back" },
-        { (uint32_t)RasterizerState::CullMode::Front, "Front" },
-    };
-}
-
-void GBufferBase::parseDictionary(const Dictionary& dict)
+void GBufferBase::parseProperties(const Properties& props)
 {
-    for (const auto& [key, value] : dict)
+    for (const auto& [key, value] : props)
     {
-        if (key == kOutputSize) mOutputSizeSelection = value;
-        else if (key == kFixedOutputSize) mFixedOutputSize = value;
-        else if (key == kSamplePattern) mSamplePattern = value;
-        else if (key == kSampleCount) mSampleCount = value;
-        else if (key == kUseAlphaTest) mUseAlphaTest = value;
-        else if (key == kAdjustShadingNormals) mAdjustShadingNormals = value;
-        else if (key == kForceCullMode) mForceCullMode = value;
-        else if (key == kCullMode) mCullMode = value;
+        if (key == kOutputSize)
+            mOutputSizeSelection = value;
+        else if (key == kFixedOutputSize)
+            mFixedOutputSize = value;
+        else if (key == kSamplePattern)
+            mSamplePattern = value;
+        else if (key == kSampleCount)
+            mSampleCount = value;
+        else if (key == kUseAlphaTest)
+            mUseAlphaTest = value;
+        else if (key == kAdjustShadingNormals)
+            mAdjustShadingNormals = value;
+        else if (key == kForceCullMode)
+            mForceCullMode = value;
+        else if (key == kCullMode)
+            mCullMode = value;
         // TODO: Check for unparsed fields, including those parsed in derived classes.
     }
 
     // Handle deprecated "disableAlphaTest" value.
-    if (dict.keyExists(kDisableAlphaTest) && !dict.keyExists(kUseAlphaTest)) mUseAlphaTest = !dict[kDisableAlphaTest];
+    if (props.has(kDisableAlphaTest) && !props.has(kUseAlphaTest))
+        mUseAlphaTest = !props[kDisableAlphaTest];
 }
 
-Dictionary GBufferBase::getScriptingDictionary()
+Properties GBufferBase::getProperties() const
 {
-    Dictionary dict;
-    dict[kOutputSize] = mOutputSizeSelection;
-    if (mOutputSizeSelection == RenderPassHelpers::IOSize::Fixed) dict[kFixedOutputSize] = mFixedOutputSize;
-    dict[kSamplePattern] = mSamplePattern;
-    dict[kSampleCount] = mSampleCount;
-    dict[kUseAlphaTest] = mUseAlphaTest;
-    dict[kAdjustShadingNormals] = mAdjustShadingNormals;
-    dict[kForceCullMode] = mForceCullMode;
-    dict[kCullMode] = mCullMode;
-    return dict;
+    Properties props;
+    props[kOutputSize] = mOutputSizeSelection;
+    if (mOutputSizeSelection == RenderPassHelpers::IOSize::Fixed)
+        props[kFixedOutputSize] = mFixedOutputSize;
+    props[kSamplePattern] = mSamplePattern;
+    props[kSampleCount] = mSampleCount;
+    props[kUseAlphaTest] = mUseAlphaTest;
+    props[kAdjustShadingNormals] = mAdjustShadingNormals;
+    props[kForceCullMode] = mForceCullMode;
+    props[kCullMode] = mCullMode;
+    return props;
 }
 
 void GBufferBase::renderUI(Gui::Widgets& widget)
 {
     // Controls for output size.
     // When output size requirements change, we'll trigger a graph recompile to update the render pass I/O sizes.
-    if (widget.dropdown("Output size", RenderPassHelpers::kIOSizeList, (uint32_t&)mOutputSizeSelection)) requestRecompile();
+    if (widget.dropdown("Output size", mOutputSizeSelection))
+        requestRecompile();
     if (mOutputSizeSelection == RenderPassHelpers::IOSize::Fixed)
     {
-        if (widget.var("Size in pixels", mFixedOutputSize, 32u, 16384u)) requestRecompile();
+        if (widget.var("Size in pixels", mFixedOutputSize, 32u, 16384u))
+            requestRecompile();
     }
 
     // Sample pattern controls.
-    bool updatePattern = widget.dropdown("Sample pattern", kSamplePatternList, (uint32_t&)mSamplePattern);
-    widget.tooltip("Selects sample pattern for anti-aliasing over multiple frames.\n\n"
-        "The camera jitter is set at the start of each frame based on the chosen pattern. All render passes should see the same jitter.\n"
-        "'Center' disables anti-aliasing by always sampling at the center of the pixel.", true);
+    bool updatePattern = widget.dropdown("Sample pattern", mSamplePattern);
+    widget.tooltip(
+        "Selects sample pattern for anti-aliasing over multiple frames.\n\n"
+        "The camera jitter is set at the start of each frame based on the chosen pattern.\n"
+        "All render passes should see the same jitter.\n"
+        "'Center' disables anti-aliasing by always sampling at the center of the pixel.",
+        true
+    );
     if (mSamplePattern != SamplePattern::Center)
     {
         updatePattern |= widget.var("Sample count", mSampleCount, 1u);
@@ -144,7 +133,7 @@ void GBufferBase::renderUI(Gui::Widgets& widget)
     }
 
     // Misc controls.
-    mOptionsChanged |=  widget.checkbox("Alpha Test", mUseAlphaTest);
+    mOptionsChanged |= widget.checkbox("Alpha Test", mUseAlphaTest);
     widget.tooltip("Use alpha testing on non-opaque triangles.");
 
     mOptionsChanged |= widget.checkbox("Adjust shading normals", mAdjustShadingNormals);
@@ -152,15 +141,18 @@ void GBufferBase::renderUI(Gui::Widgets& widget)
 
     // Cull mode controls.
     mOptionsChanged |= widget.checkbox("Force cull mode", mForceCullMode);
-    widget.tooltip("Enable this option to override the default cull mode.\n\n"
-        "Otherwise the default for rasterization is to cull backfacing geometry, and for ray tracing to disable culling.", true);
+    widget.tooltip(
+        "Enable this option to override the default cull mode.\n\n"
+        "Otherwise the default for rasterization is to cull backfacing geometry, "
+        "and for ray tracing to disable culling.",
+        true
+    );
 
     if (mForceCullMode)
     {
-        uint32_t cullMode = (uint32_t)mCullMode;
-        if (widget.dropdown("Cull mode", kCullModeList, cullMode))
+        if (auto cullMode = mCullMode; widget.dropdown("Cull mode", cullMode))
         {
-            setCullMode((RasterizerState::CullMode)cullMode);
+            setCullMode(cullMode);
             mOptionsChanged = true;
         }
     }
@@ -182,7 +174,7 @@ void GBufferBase::execute(RenderContext* pRenderContext, const RenderData& rende
     dict[Falcor::kRenderPassGBufferAdjustShadingNormals] = mAdjustShadingNormals;
 }
 
-void GBufferBase::setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene)
+void GBufferBase::setScene(RenderContext* pRenderContext, const ref<Scene>& pScene)
 {
     mpScene = pScene;
     mFrameCount = 0;
@@ -200,7 +192,7 @@ void GBufferBase::setScene(RenderContext* pRenderContext, const Scene::SharedPtr
     }
 }
 
-static CPUSampleGenerator::SharedPtr createSamplePattern(GBufferBase::SamplePattern type, uint32_t sampleCount)
+static ref<CPUSampleGenerator> createSamplePattern(GBufferBase::SamplePattern type, uint32_t sampleCount)
 {
     switch (type)
     {
@@ -225,23 +217,25 @@ void GBufferBase::updateFrameDim(const uint2 frameDim)
     mInvFrameDim = 1.f / float2(frameDim);
 
     // Update sample generator for camera jitter.
-    if (mpScene) mpScene->getCamera()->setPatternGenerator(mpSampleGenerator, mInvFrameDim);
+    if (mpScene)
+        mpScene->getCamera()->setPatternGenerator(mpSampleGenerator, mInvFrameDim);
 }
 
 void GBufferBase::updateSamplePattern()
 {
     mpSampleGenerator = createSamplePattern(mSamplePattern, mSampleCount);
-    if (mpSampleGenerator) mSampleCount = mpSampleGenerator->getSampleCount();
+    if (mpSampleGenerator)
+        mSampleCount = mpSampleGenerator->getSampleCount();
 }
 
-Texture::SharedPtr GBufferBase::getOutput(const RenderData& renderData, const std::string& name) const
+ref<Texture> GBufferBase::getOutput(const RenderData& renderData, const std::string& name) const
 {
     // This helper fetches the render pass output with the given name and verifies it has the correct size.
     FALCOR_ASSERT(mFrameDim.x > 0 && mFrameDim.y > 0);
     auto pTex = renderData.getTexture(name);
     if (pTex && (pTex->getWidth() != mFrameDim.x || pTex->getHeight() != mFrameDim.y))
     {
-        throw RuntimeError("GBufferBase: Pass output '{}' has mismatching size. All outputs must be of the same size.", name);
+        FALCOR_THROW("GBufferBase: Pass output '{}' has mismatching size. All outputs must be of the same size.", name);
     }
     return pTex;
 }

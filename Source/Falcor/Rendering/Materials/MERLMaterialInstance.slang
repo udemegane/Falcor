@@ -42,7 +42,7 @@ import Scene.Scene;
 
 /** Implementation of the BSDF for the measured MERL material.
 */
-struct MERLMaterialInstance : IMaterialInstance
+struct MERLMaterialInstance : MaterialInstanceBase, IMaterialInstance
 {
     ShadingFrame sf;    ///< Shading frame in world space.
     uint bufferID;      ///< Buffer ID in material system where BRDF data is stored.
@@ -64,13 +64,19 @@ struct MERLMaterialInstance : IMaterialInstance
         float3 wiLocal = sf.toLocal(sd.V);
         float3 woLocal = sf.toLocal(wo);
 
-        if (min(wiLocal.z, woLocal.z) < kMinCosTheta) return float3(0.f);
+        if (!isValidHemisphereReflection(sd, sf, wiLocal, woLocal, wo)) return float3(0.f);
 
 #if VISUALIZE_FITTED_BRDF
         return fittedBrdf.eval(wiLocal, woLocal, sg);
 #else
         return evalLocal(wiLocal, woLocal);
 #endif
+    }
+
+    [Differentiable]
+    float3 evalAD<S : ISampleGenerator>(const DiffMaterialData diffData, const ShadingData sd, const float3 wo, inout S sg)
+    {
+        return float3(0.f);
     }
 
     bool sample<S : ISampleGenerator>(const ShadingData sd, inout S sg, out BSDFSample result, bool useImportanceSampling = true)
@@ -80,10 +86,10 @@ struct MERLMaterialInstance : IMaterialInstance
 #if SAMPLE_FITTED_BRDF
         float3 woLocal = {};
         if (!fittedBrdf.sample(wiLocal, woLocal, result.pdf, result.weight, result.lobeType, sg)) return false;
-
-        if (min(wiLocal.z, woLocal.z) < kMinCosTheta || result.pdf == 0.f) return false;
-
         result.wo = sf.fromLocal(woLocal);
+
+        if (!isValidHemisphereReflection(sd, sf, wiLocal, woLocal, result.wo) || result.pdf == 0.f) return false;
+
 #if !VISUALIZE_FITTED_BRDF
         result.weight = evalLocal(wiLocal, woLocal) / result.pdf;
 #endif
@@ -92,10 +98,10 @@ struct MERLMaterialInstance : IMaterialInstance
         // Draw cosine-weighted sample over the hemisphere.
         // TODO: Implement better importance sampling.
         float3 woLocal = sample_cosine_hemisphere_concentric(sampleNext2D(sg), result.pdf); // pdf = cos(theta) / pi
-
-        if (min(wiLocal.z, woLocal.z) < kMinCosTheta || result.pdf == 0.f) return false;
-
         result.wo = sf.fromLocal(woLocal);
+
+        if (!isValidHemisphereReflection(sd, sf, wiLocal, woLocal, result.wo) || result.pdf == 0.f) return false;
+
 #if VISUALIZE_FITTED_BRDF
         result.weight = fittedBrdf.eval(wiLocal, woLocal, sg) / result.pdf;
 #else
@@ -112,7 +118,7 @@ struct MERLMaterialInstance : IMaterialInstance
         float3 wiLocal = sf.toLocal(sd.V);
         float3 woLocal = sf.toLocal(wo);
 
-        if (min(wiLocal.z, woLocal.z) < kMinCosTheta) return 0.f;
+        if (!isValidHemisphereReflection(sd, sf, wiLocal, woLocal, wo)) return 0.f;
 
 #if SAMPLE_FITTED_BRDF
         return fittedBrdf.evalPdf(wiLocal, woLocal);

@@ -25,21 +25,29 @@
  # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
-#include "Utils/Math/MathConstants.slangh"
-
 __exported import Rendering.Materials.IMaterialInstance;
-__exported import Rendering.Materials.BxDF;
 __exported import Rendering.Materials.AnisotropicGGX;
-import Utils.Color.ColorHelpers;
-import Utils.Math.MathHelpers;
+__exported import DiffRendering.SceneGradients;
+__exported import DiffRendering.GradientIOWrapper;
 import Rendering.Materials.Fresnel;
 
-struct PBRTConductorBSDF : IBSDF
+struct PBRTConductorBSDF : IBSDF, IDifferentiable
 {
     AnisotropicGGX D;
     float3 eta;
     float3 k;
 
+    [Differentiable]
+    __init(const DiffMaterialData diffData)
+    {
+        uint offset = 0;
+        diffData.read(eta, offset);
+        diffData.read(k, offset);
+        float2 roughness = diffData.read<2>(offset);
+        D = AnisotropicGGX(roughness);
+    }
+
+    [Differentiable]
     float3 eval<S : ISampleGenerator>(const float3 wiLocal, const float3 woLocal, inout S sg)
     {
         if (D.isSingular() || min(wiLocal.z, woLocal.z) < 0.0f) return float3(0.0f);
@@ -53,6 +61,11 @@ struct PBRTConductorBSDF : IBSDF
 
     bool sample<S : ISampleGenerator>(float3 wiLocal, out float3 wo, out float pdf, out float3 weight, out uint lobeType, inout S sg)
     {
+        wo = {};
+        pdf = {};
+        weight = {};
+        lobeType = {};
+
         if (wiLocal.z < 0.0f) return false;
 
         if (D.isSingular())
@@ -100,27 +113,54 @@ struct PBRTConductorBSDF : IBSDF
     }
 };
 
-struct PBRTConductorMaterialInstance : IMaterialInstance
+struct PBRTConductorMaterialInstance : MaterialInstanceBase, IMaterialInstance
 {
     ShadingFrame sf;            ///< Shading frame in world space.
     PBRTConductorBSDF bsdf;
 
     float3 eval<S : ISampleGenerator>(const ShadingData sd, const float3 wo, inout S sg)
     {
-        return bsdf.eval(sf.toLocal(sd.V), sf.toLocal(wo), sg);
+        float3 wiLocal = sf.toLocal(sd.V);
+        float3 woLocal = sf.toLocal(wo);
+
+        if (!isValidHemisphereReflection(sd, sf, wiLocal, woLocal, wo)) return float3(0.f);
+
+        return bsdf.eval(wiLocal, woLocal, sg);
+    }
+
+    [Differentiable]
+    float3 evalAD<S : ISampleGenerator>(const DiffMaterialData diffData, const ShadingData sd, const float3 wo, inout S sg)
+    {
+        float3 wiLocal = diffData.sf.toLocal(sd.V);
+        float3 woLocal = diffData.sf.toLocal(wo);
+
+        if (!isValidHemisphereReflection(sd, sf, wiLocal, woLocal, wo)) return float3(0.f);
+
+        PBRTConductorBSDF bsdfAD = PBRTConductorBSDF(diffData);
+        return bsdfAD.eval(wiLocal, woLocal, sg);
     }
 
     bool sample<S : ISampleGenerator>(const ShadingData sd, inout S sg, out BSDFSample result, bool useImportanceSampling = true)
     {
-        bool valid = bsdf.sample(sf.toLocal(sd.V), result.wo, result.pdf, result.weight, result.lobeType, sg);
+        float3 wiLocal = sf.toLocal(sd.V);
+        float3 woLocal = {};
 
-        result.wo = sf.fromLocal(result.wo);
+        bool valid = bsdf.sample(wiLocal, woLocal, result.pdf, result.weight, result.lobeType, sg);
+        result.wo = sf.fromLocal(woLocal);
+
+        if (!isValidHemisphereReflection(sd, sf, wiLocal, woLocal, result.wo) || result.pdf == 0.f) return false;
+
         return valid;
     }
 
     float evalPdf(const ShadingData sd, const float3 wo, bool useImportanceSampling = true)
     {
-        return bsdf.evalPdf(sf.toLocal(sd.V), sf.toLocal(wo));
+        float3 wiLocal = sf.toLocal(sd.V);
+        float3 woLocal = sf.toLocal(wo);
+
+        if (!isValidHemisphereReflection(sd, sf, wiLocal, woLocal, wo)) return 0.f;
+
+        return bsdf.evalPdf(wiLocal, woLocal);
     }
 
     BSDFProperties getProperties(const ShadingData sd)

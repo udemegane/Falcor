@@ -30,60 +30,47 @@
 #include "Handles.h"
 #include "Raytracing.h"
 #include "Core/Macros.h"
+#include "Core/Object.h"
 #include "Core/Program/ProgramVersion.h"
-#include <memory>
 #include <string>
 #include <vector>
 
 namespace Falcor
 {
-class FALCOR_API RtStateObject
+
+struct RtStateObjectDesc
 {
-public:
-    using SharedPtr = std::shared_ptr<RtStateObject>;
+    ref<const ProgramKernels> pProgramKernels;
+    uint32_t maxTraceRecursionDepth = 0;
+    RtPipelineFlags pipelineFlags = RtPipelineFlags::None;
 
-    struct Desc
+    bool operator==(const RtStateObjectDesc& other) const
     {
-        ProgramKernels::SharedConstPtr pKernels;
-        uint32_t maxTraceRecursionDepth = 0;
-        RtPipelineFlags pipelineFlags = RtPipelineFlags::None;
+        bool result = true;
+        result = result && (pProgramKernels == other.pProgramKernels);
+        result = result && (maxTraceRecursionDepth == other.maxTraceRecursionDepth);
+        result = result && (pipelineFlags == other.pipelineFlags);
+        return result;
+    }
+};
 
-        Desc& setKernels(const ProgramKernels::SharedConstPtr& pKernels)
-        {
-            this->pKernels = pKernels;
-            return *this;
-        }
-        Desc& setMaxTraceRecursionDepth(uint32_t maxDepth)
-        {
-            this->maxTraceRecursionDepth = maxDepth;
-            return *this;
-        }
-        Desc& setPipelineFlags(RtPipelineFlags flags)
-        {
-            this->pipelineFlags = flags;
-            return *this;
-        }
+class FALCOR_API RtStateObject : public Object
+{
+    FALCOR_OBJECT(RtStateObject)
+public:
+    RtStateObject(ref<Device> pDevice, const RtStateObjectDesc& desc);
+    ~RtStateObject();
 
-        bool operator==(const Desc& other) const
-        {
-            return pKernels == other.pKernels && maxTraceRecursionDepth == other.maxTraceRecursionDepth &&
-                   pipelineFlags == other.pipelineFlags;
-        }
-    };
-
-    static SharedPtr create(Device* pDevice, const Desc& desc);
     gfx::IPipelineState* getGfxPipelineState() const { return mGfxPipelineState; }
 
-    const ProgramKernels::SharedConstPtr& getKernels() const { return mDesc.pKernels; };
+    const ref<const ProgramKernels>& getKernels() const { return mDesc.pProgramKernels; };
     uint32_t getMaxTraceRecursionDepth() const { return mDesc.maxTraceRecursionDepth; }
     void const* getShaderIdentifier(uint32_t index) const { return mEntryPointGroupExportNames[index].c_str(); }
-    const Desc& getDesc() const { return mDesc; }
+    const RtStateObjectDesc& getDesc() const { return mDesc; }
 
 private:
-    RtStateObject(std::shared_ptr<Device> pDevice, const Desc& desc);
-
-    std::shared_ptr<Device> mpDevice;
-    Desc mDesc;
+    ref<Device> mpDevice;
+    RtStateObjectDesc mDesc;
     Slang::ComPtr<gfx::IPipelineState> mGfxPipelineState;
     std::vector<std::string> mEntryPointGroupExportNames;
 };

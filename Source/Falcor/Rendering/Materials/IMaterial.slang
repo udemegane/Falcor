@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -65,23 +65,11 @@ interface IMaterial
     */
     MaterialInstance setupMaterialInstance(const MaterialSystem ms, const ShadingData sd, const ITextureSampler lod, const uint hints = (uint)MaterialInstanceHints::None);
 
-    /** Modify the tangent space at the given shading point.
-        This function is called by the material system when preparing the `ShadingData` struct.
-        It allows materials to implement normal mapping and other techniques that modify the local surface geometry.
-        Materials that do not need to modify the default tangent frame should leave the shading data unchanged.
-        \param[in] ms Material system. This provides the resources for pattern generation.
-        \param[in] lod Method to use for computing texture level of detail, must implement the `ITextureSampler` interface.
-        \param[in,out] sd Shading data.
+    /** A differentiable version of `setupMaterialInstance`.
+        This operation returns an additional `DiffMaterialData` structure that contains differentiable parameters.
     */
-    void modifyTangentSpace(const MaterialSystem ms, const ITextureSampler lod, inout ShadingData sd);
-
-    /** Evaluate opacity at the given shading point.
-        \param[in] ms Material system. This provides the resources for opacity evaluation.
-        \param[in] v Interpolated attributes at the shading point.
-        \param[in] lod Method to use for computing texture level of detail, must implement the `ITextureSampler` interface.
-        \return Opacity value in range 0..1.
-    */
-    float evalOpacity(const MaterialSystem ms, const VertexData v, const ITextureSampler lod);
+    [Differentiable]
+    MaterialInstance setupDiffMaterialInstance(out DiffMaterialData diffData, const MaterialSystem ms, const ShadingData sd, const ITextureSampler lod, const uint hints = (uint)MaterialInstanceHints::None);
 
     /** Returns volume properties that are homogeneous for the whole volume (do not depend on the hitpoint).
      */

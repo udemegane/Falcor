@@ -26,14 +26,15 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #include "DepthStencilState.h"
-#include "Core/Assert.h"
+#include "Core/Error.h"
+#include "Core/ObjectPython.h"
 #include "Utils/Scripting/ScriptBindings.h"
 
 namespace Falcor
 {
-DepthStencilState::SharedPtr DepthStencilState::create(const Desc& desc)
+ref<DepthStencilState> DepthStencilState::create(const Desc& desc)
 {
-    return SharedPtr(new DepthStencilState(desc));
+    return ref<DepthStencilState>(new DepthStencilState(desc));
 }
 
 DepthStencilState::~DepthStencilState() = default;
@@ -50,7 +51,7 @@ DepthStencilState::Desc& DepthStencilState::Desc::setStencilReadMask(uint8_t mas
     return *this;
 }
 
-DepthStencilState::Desc& DepthStencilState::Desc::setStencilFunc(Face face, Func func)
+DepthStencilState::Desc& DepthStencilState::Desc::setStencilFunc(Face face, ComparisonFunc func)
 {
     if (face == Face::FrontAndBack)
     {
@@ -92,6 +93,6 @@ const DepthStencilState::StencilDesc& DepthStencilState::getStencilDesc(Face fac
 
 FALCOR_SCRIPT_BINDING(DepthStencilState)
 {
-    pybind11::class_<DepthStencilState, DepthStencilState::SharedPtr>(m, "DepthStencilState");
+    pybind11::class_<DepthStencilState, ref<DepthStencilState>>(m, "DepthStencilState");
 }
 } // namespace Falcor

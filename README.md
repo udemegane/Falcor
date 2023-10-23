@@ -1,158 +1,50 @@
-![](docs/images/demo_teaser.jpg)
-# Falcor ReSTIR GI Demo (Unofficial)
+![](docs/images/teaser.png)
 
-Original Falcor repository: https://github.com/NVIDIAGameWorks/Falcor
-Original Falcor README: [README.original.md](./README.original.md)
+# Falcor
 
----
+Falcor is a real-time rendering framework supporting DirectX 12 and Vulkan. It aims to improve productivity of research and prototype projects.
 
-- [Falcor ReSTIR GI Demo](#falcor-restir-gi-demo)
-- [Abstract](#abstract)
-- [Run the Demo](#run-the-demo)
-  - [Download](#download)
-  - [Run](#run)
-    - [Keyboard Shortcuts](#keyboard-shortcuts)
-    - [GUI parameters](#gui-parameters)
-      - [ReSTIR DI/GI parameters](#restir-digi-parameters)
-      - [Others](#others)
-- [How to build](#how-to-build)
-  - [Prerequisites](#prerequisites)
-  - [Clone and build](#clone-and-build)
-    - [Visual Studio](#visual-studio)
-    - [Visual Studio Code](#visual-studio-code)
-    - [Configure Presets](#configure-presets)
-- [Graphics pipeline overview](#graphics-pipeline-overview)
-  - [Graph Overview](#graph-overview)
-  - [Resources detail and execution time](#resources-detail-and-execution-time)
-    - [Gbuffer](#gbuffer)
-    - [ReSTIR DI](#restir-di)
-    - [ReSTIR GI](#restir-gi)
-      - [Output](#output)
-    - [NRD](#nrd)
-    - [ModulateIllumination \& ToneMapper](#modulateillumination--tonemapper)
+Features include:
+* Abstracting many common graphics operations, such as shader compilation, model loading, and scene rendering
+* Raytracing support
+* Python scripting support
+* Render graph system to build modular renderers
+* Common rendering techniques such post-processing effects
+* Unbiased path tracer
+* Integration of various RTX SDKs such as DLSS, RTXDI and NRD
 
----
-
-# Abstract
-This branch of repository contains a demo of the ReSTIR DI/GI technique implemented in **[Falcor 6.0](https://research.nvidia.com/publication/2021-06_restir-gi-path-resampling-real-time-path-tracing)**.
-This is **my personal project, UNOFFICIAL implementation**, and the code is **just for study purpose** and inperfect.
-
-ReSTIR DI/GI technique enables to render high quality image of scenes with many light sources and indirect lighting using real-time raytracing with few rays at each pixel per frame.
- - Official ReSTIR GI project page: https://research.nvidia.com/publication/2021-06_restir-gi-path-resampling-real-time-path-tracing
- - Official ReSTIR DI project page: https://benedikt-bitterli.me/restir/
-
-Also this demo use Nvidia Real-Time denoisers (NRD) to denoise the image which is included in Falcor.
- - Official NRD SDK page: https://developer.nvidia.com/rtx/ray-tracing/rt-denoisers
- - NRD Github page: https://github.com/NVIDIAGameWorks/RayTracingDenoiser
-
-The implementation is in [`Source/RenderPasses/Falcor-playground`](https://github.com/udemegane/Falcor-playground), as 2 RenderPasses `ReSTIRDIPass` and `ReSTIRGIPass`.
-
-
-
-**Details of implementation is described in [here](#graphics-pipeline-overview)**.
-
-
-
-# Run the Demo
-## Download
-~~You can download the prebuild demo from [Releases](https://github.com/udemegane/Falcor/releases/tag/v0.1.0-restir_gi_demo).~~ (Currently it's doesn't work. Maybe Falcor doesn't support to build portable executable?)
-
-Or you can build the demo by yourself. See [How to build](#how-to-build) section.
-And you can olso download 3D scenes form [ORCA](https://developer.nvidia.com/orca): A collection of scenes and assets optimized for Falcor.
-
-## Run
-Execute `Demo.bat`, then the renderer will launch.
-If you build falcor manually, execute `Demo_vscode/vs2019/vs2022.bat` Instead of Demo.bat.
-
-![](docs/images/2023-05-11-01-23-56.png)\
-Click `File` -> `Load Scene`, then select a scene file.\
-![](docs/images/2023-05-11-01-00-30.png)\
-
-Then, you can see the real-time pathtrace demo.
-![](docs/images/2023-05-11-02-21-44.png)\
-For more information, please see Falcor original Page: https://github.com/NVIDIAGameWorks/Falcor
-
-### Keyboard Shortcuts
-
-`F1` - Show the help message\
-`F2` - Show/Hide the GUI\
-`F6` - Show/Hide the graph controls\
-`F9` - Show/Hide the time controls\
-`F10` - Show/Hide FPS\
-`F11` - Show/Hide the menu bar\
-`` ` `` - Show/Hide the scripting console\
-`P` - Enable/Disable profiling\
-`Esc` - Quit
-
-`Ctrl + O` - Load script\
-`Ctrl + Shift + O` - Load scene\
-`F5` - Reload shaders\
-`V` - Toggle VSync\
-`F12` - Capture screenshot\
-`Shift + F12` - Capture video\
-`Pause` or `Space` - Pause/Resume the global timer\
-`Ctrl + Pause` or `Ctrl + Space` - Pause/Resume the renderer
-
-`W, A, S, D, Q, E` - Move the camera\
-`Left Click + Drag` - Rotate camera\
-`Shift` - Speeds up camera movement when held down\
-`Ctrl` - Slows down camera movement when held down\
-`Z` - Magnify the currently hovered area\
-`Mouse Wheel` - Change zoom level when magnifying a pixel
-
-You can see more information for handling Mogwai from [here](https://github.com/NVIDIAGameWorks/Falcor/tree/master/docs/tutorials).
-
-### GUI parameters
-#### ReSTIR DI/GI parameters
-![](docs/images/2023-05-11-01-53-11.png)
-- `Enable ReSTIR` : Enable/Disable ReSTIR for direct illumination from scene analytic lights
-- `Use Half Resolution` : Enable/Disable half resolution for Indirect Lighting
-  - Note: This option is still incomplete, so it causes firefly noise in the image.
-- `Secondary Ray Probability` : The probability of tracing secondary multi-bounce ray for Indirect Lighting.
-- `Russian Roulette Probability` : The propablity of tracing multi-bounce ray for Indirect Lighting.
-- `Use Multi Bounces` : Enable/Disable Multi bounces for Indirect Lighting. The number of bounces is limited by `Max Bounces` parameter.
-- `Exclude EnvMap and Emissive mesh from RIS` : If this option is enabled, the ReSTIR algorithm uses only the scene analytic lights.
-  - Note: Because the implementation is imperfect, resampling of emissive lights overestimates radiance. This option is On by default.
-- `Temporal Resampling` : Enable/Disable Temporal Resampling for Indirect Lighting.
-  - `Reservoir Size` : Max temporal reservoir size.
-- `Spatial Resampling` : Enable/Disable Spatial Resampling for Indirect Lighting.
-  - `Neighbors Count` : Number of neighbors for spatial resampling.
-  - `Sample Radius` : Radius of spatial resampling.
-  - `Reservoir Size` : Max spatial reservoir size.
-
-#### Others
-You can also change parameters other renderpasses, and scene settings such as lights, camera, etc.
-![](docs/images/2023-05-11-02-44-01.png)\
-![](docs/images/changelights.gif)
-
-
-# How to build
 ## Prerequisites
-  - Windows 10 version 20H2 (October 2020 Update) or newer, OS build revision .789 or newer
-  - Visual Studio 2019/2022
-  - Windows 10 SDK (10.0.19041.0) for Windows 10, version 2004
-  - A GPU which supports DirectX Raytracing, such as the NVIDIA Titan V or GeForce RTX
-  - NVIDIA driver 466.11 or newer
+- Windows 10 version 20H2 (October 2020 Update) or newer, OS build revision .789 or newer
+- Visual Studio 2022
+- [Windows 10 SDK (10.0.19041.0) for Windows 10, version 2004](https://developer.microsoft.com/en-us/windows/downloads/windows-10-sdk/)
+- A GPU which supports DirectX Raytracing, such as the NVIDIA Titan V or GeForce RTX
+- NVIDIA driver 466.11 or newer
 
-This demo requires the Falcor framework. For more information, please follow the Falcor original Page: https://github.com/NVIDIAGameWorks/Falcor
+Optional:
+- Windows 10 Graphics Tools. To run DirectX 12 applications with the debug layer enabled, you must install this. There are two ways to install it:
+    - Click the Windows button and type `Optional Features`, in the window that opens click `Add a feature` and select `Graphics Tools`.
+    - Download an offline package from [here](https://docs.microsoft.com/en-us/windows-hardware/test/hlk/windows-hardware-lab-kit#supplemental-content-for-graphics-media-and-mean-time-between-failures-mtbf-tests). Choose a ZIP file that matches the OS version you are using (not the SDK version used for building Falcor). The ZIP includes a document which explains how to install the graphics tools.
+- NVAPI, CUDA, OptiX (see below)
 
-## Clone and build
-
-Clone this repository by specifying "ReSTIR_GI_Demo" branch with submodules.
-```bash
-git clone -b ReSTIR_GI_Demo https://github.com/udemegane/Falcor.git --recursive
-```
+## Building Falcor
 Falcor uses the [CMake](https://cmake.org) build system. Additional information on how to use Falcor with CMake is available in the [CMake](docs/development/cmake.md) development documetation page.
 
 ### Visual Studio
-If you are working with Visual Studio, you can setup a native Visual Studio solution by running `setup_vs2019.bat` (or `setup_vs2022.bat`, same process) after cloning this repository. The solution files are written to `build/windows-vs2019` and the binary output is located in `build/windows-vs2019/bin`.
-
+If you are working with Visual Studio 2022, you can setup a native Visual Studio solution by running `setup_vs2022.bat` after cloning this repository. The solution files are written to `build/windows-vs2022` and the binary output is located in `build/windows-vs2022/bin`.
 
 ### Visual Studio Code
-If you are working with Visual Studio Code, run `setup.bat` after cloning this repository. This will setup a VS Code workspace in the `.vscode` folder with sensible defaults (only if `.vscode` does not exist yet). When opening the project folder in VS Code, it will prompt to install recommended extensions. We recommend you do, but at least make sure that _CMake Tools_ is installed. To build Falcor, you can select the configure preset by executing the _CMake: Select Configure Preset_ action (Ctrl+Shift+P). Choose the _Windows Ninja/MSVC_ preset (or one for a different rendering backend). Then simply hit _Build_ (or press F7) to build the project. The binary output is located in `build/windows-ninja-msvc/bin`.
+If you are working with Visual Studio Code, run `setup.bat` after cloning this repository. This will setup a VS Code workspace in the `.vscode` folder with sensible defaults (only if `.vscode` does not exist yet). When opening the project folder in VS Code, it will prompt to install recommended extensions. We recommend you do, but at least make sure that _CMake Tools_ is installed. To build Falcor, you can select the configure preset by executing the _CMake: Select Configure Preset_ action (Ctrl+Shift+P). Choose the _Windows Ninja/MSVC_ preset. Then simply hit _Build_ (or press F7) to build the project. The binary output is located in `build/windows-ninja-msvc/bin`.
 
 Warning: Do not start VS Code from _Git Bash_, it will modify the `PATH` environment variable to an incompatible format, leading to issues with CMake.
-Note: wip
+
+### Linux
+Falcor has experimental support for Ubuntu 22.04. To build Falcor on Linux, run `setup.sh` after cloning this repository. You also need to install some system library headers using:
+
+```
+sudo apt install xorg-dev libgtk-3-dev
+```
+
+You can use the same instructions for building Falcor as described in the _Visual Studio Code_ section above, simply choose the _Linux/GCC_ preset.
 
 ### Configure Presets
 Falcor uses _CMake Presets_ store in `CMakePresets.json` to provide a set of commonly used build configurations. You can get the full list of available configure presets running `cmake --list-presets`:
@@ -161,183 +53,65 @@ Falcor uses _CMake Presets_ store in `CMakePresets.json` to provide a set of com
 $ cmake --list-presets
 Available configure presets:
 
-  "windows-vs2019"           - Windows VS2019
   "windows-vs2022"           - Windows VS2022
   "windows-ninja-msvc"       - Windows Ninja/MSVC
-  "linux-ninja-clang"        - Linux Ninja/Clang
+  "linux-clang"              - Linux Ninja/Clang
+  "linux-gcc"                - Linux Ninja/GCC
 ```
 
 Use `cmake --preset <preset name>` to generate the build tree for a given preset. The build tree is written to the `build/<preset name>` folder and the binary output files are in `build/<preset name>/bin`.
 
 An existing build tree can be compiled using `cmake --build build/<preset name>`.
 
----
-# Graphics pipeline overview
-## Graph Overview
-Render-Graph dependency of this demo is shown in below.\
-![](docs/images/Graph.jpg)
+## Falcor In Python
+For more information on how to use Falcor as a Python module see [Falcor In Python](docs/falcor-in-python.md).
 
-The above diagram omits resources that are not actually used.
-The actual dependencies are described in [the python script](https://github.com/udemegane/Falcor/blob/ReSTIR_GI_Demo/scripts/RealTimePathTrace.py).
+## Microsoft DirectX 12 Agility SDK
+Falcor uses the [Microsoft DirectX 12 Agility SDK](https://devblogs.microsoft.com/directx/directx12agility/) to get access to the latest DirectX 12 features. Applications can enable the Agility SDK by putting `FALCOR_EXPORT_D3D12_AGILITY_SDK` in the main `.cpp` file. `Mogwai`, `FalcorTest` and `RenderGraphEditor` have the Agility SDK enabled by default.
 
-## Resources detail and execution time
-I tested this demo on my PC (RTX 2080, Ryzen 9 3900X, 64GB RAM) with 1920x1057 resolution on Amazon lumberyard bistro exteroir, and get 40~60FPS by default settings.
+## NSight Aftermath
+To enable NSight Aftermath support, head over to https://developer.nvidia.com/nsight-aftermath and download the latest version of Aftermath (this build is tested against version 2023.1).
+Extract the content of the zip file into `external/packman/aftermath`.
 
-### Gbuffer
+## CUDA
+To enable CUDA support, download and install [CUDA 11.6.2](https://developer.nvidia.com/cuda-11-6-2-download-archive) or later and reconfigure the build.
 
----
+See the `CudaInterop` sample application located in `Source/Samples/CudaInterop` for an example of how to use CUDA.
 
-### ReSTIR DI
-Constructed by 2 pass (Prepare Reservoir pass and Final shading pass).
-- Prepare Reservoir pass
-  - Initial Sampling
-  - Temporal Resampling
-- Final shading pass
-  - Spatial Resampling
-  - Final Shading
+## OptiX
+If you want to use Falcor's OptiX functionality (specifically the `OptixDenoiser` render pass) download the [OptiX SDK](https://developer.nvidia.com/designworks/optix/download) (Falcor is currently tested against OptiX version 7.3) After running the installer, link or copy the OptiX SDK folder into `external/packman/optix` (i.e., file `external/packman/optix/include/optix.h` should exist).
 
-Intermediate Buffer payload(ReSTIR Reservoir) is shown below.\
-```hlsl
-struct Sample
-{
-    float3 Li; // already multiply invPdf.
-    float3 dir;
-    float length;
-}
+Note: You also need CUDA installed to compile the `OptixDenoiser` render pass, see above for details.
 
-struct Reservoir
-{
-    float wSum;
-    Sample s;
-    float targetPdfSample;
-    uint M;
-    ...
-}
+## NVIDIA RTX SDKs
+Falcor ships with the following NVIDIA RTX SDKs:
 
-struct PackedReservoir
-{
-    // 128bit x2
-    uint4 pTargetLi;
-    float2 LengthWsum;
-    uint2 MDir;
-}
-```
+- DLSS (https://github.com/NVIDIA/DLSS)
+- RTXDI (https://github.com/NVIDIAGameWorks/RTXDI)
+- NRD (https://github.com/NVIDIAGameWorks/RayTracingDenoiser)
 
-<br>
+Note that these SDKs are not under the same license as Falcor, see [LICENSE.md](LICENSE.md) for details.
 
-- Direct Illumination by ReSTIR (only analytic lights are included in the ReSTIR algorithm)
-![Direct Illumination](docs/images/renderpass_capture/png/2023-05-12-15-49-23.png "Direct Illumination")
+## Resources
+- [Falcor](https://github.com/NVIDIAGameWorks/Falcor): Falcor's GitHub page.
+- [Documentation](./docs/index.md): Additional information and tutorials.
+    - [Getting Started](./docs/getting-started.md)
+    - [Render Graph Tutorials](./docs/tutorials/index.md)
+- [Rendering Resources](https://benedikt-bitterli.me/resources) A collection of scenes loadable in Falcor (pbrt-v4 format).
+- [ORCA](https://developer.nvidia.com/orca): A collection of scenes and assets optimized for Falcor.
+- [Slang](https://github.com/shader-slang/slang): Falcor's shading language and compiler.
 
-This render pass also output diffuse/specular reflectance for demodulation.
+## Citation
+If you use Falcor in a research project leading to a publication, please cite the project.
+The BibTex entry is
 
-- Diffuse reflectance(black sky albedo) + Specular translucent reflectance
-![](docs/images/renderpass_capture/png/2023-05-12-16-11-48.png "Diffuse Reflectance")
-
-
-- Specular reflectance
-![](docs/images/renderpass_capture/png/2023-05-12-16-12-41.png "Specular Reflectance")
-
----
-
-### ReSTIR GI
-Constructed by 2 pass (Prepare Reservoir pass and Final shading pass).
-- Prepare Reservoir pass
-  - Initial Sampling
-  - Temporal Resampling
-- Final shading pass
-  - Spatial Resampling
-  - Final Shading
-
-Intermediate Buffer payload(ReSTIR GI Reservoir) is shown below.\
-```hlsl
-struct GISample
-{
-    float3 xv;         //
-    float3 nv;         //
-    float3 xs;         //
-    float3 ns;         //
-    float3 Lo;         //
-    float3 weight;     //
-    float invPdf;      //
-    float sceneLength; //
-}
-
-struct GIReservoir
-{
-    GISample s; //
-    float wSum; //
-    uint M;
-    bool updated;
-    float targetPdfSample; //
-
-}
-
-
-struct PackedGIReservoir
-{
-    // 128bit x5
-    // it's too heavy...
-    float4 LoSceneLength;
-    float4 weightInvPdf;
-    float4 XvWSum;
-    float4 XsPTarget;
-    uint4 NvMNsUpdated;
+```bibtex
+@Misc{Kallweit22,
+   author =      {Simon Kallweit and Petrik Clarberg and Craig Kolb and Tom{'a}{\v s} Davidovi{\v c} and Kai-Hwa Yao and Theresa Foley and Yong He and Lifan Wu and Lucy Chen and Tomas Akenine-M{\"o}ller and Chris Wyman and Cyril Crassin and Nir Benty},
+   title =       {The {Falcor} Rendering Framework},
+   year =        {2022},
+   month =       {8},
+   url =         {https://github.com/NVIDIAGameWorks/Falcor},
+   note =        {\url{https://github.com/NVIDIAGameWorks/Falcor}}
 }
 ```
-
-<br>
-
-
-- Indirect illumination at initial naive sampling. Actually, this output is placed on reservoir, don’t output as texture.
-![](docs/images/renderpass_capture/png/2023-05-12-16-15-29.png "Indirect Illumination (No ReSTIR GI algorithm)")
-
-- Indirect illumination by ReSTIR GI algorithm.(temporal and spatial resembling)
-![](docs/images/renderpass_capture/png/2023-05-12-16-13-48.png "Indirect Illumination")
-
-- ReSTIR DI+GI output.
-![](docs/images/renderpass_capture/png/2023-05-12-16-14-25.png "Indirect + Direct Illumination")
-
-Instead of color output, NRD requires diffuse/Specular demodulation output. I simply divide the color by diffuse/specular reflectance(ReSTIR pass output).
-
-- Indirect diffuse radiance.
-![](docs/images/renderpass_capture/png/2023-05-12-16-26-24.png "Indirect diffuse radiance (demodulated)")
-
-- Indirect Specular radiance.
-![](docs/images/renderpass_capture/png/2023-05-12-16-26-42.png "Indirect specular radiance (demodulated)")
-
-#### Output
-
-Finally, this pass output DI+GI estimated noisy result and raytrace path distance from secondary ray.
-- Indirect + direct diffuse radiance(RGB) and raytraced path distance from secondary ray(A).
-![](docs/images/renderpass_capture/png/2023-05-12-16-28-46.png "Indirect + Direct diffuse radiance (demodulated)")
-
-- Indirect + direct Specular radiance(RGB) and raytraced path distance from secondary ray(A).
-![](docs/images/renderpass_capture/png/2023-05-12-16-29-37.png "Indirect + Direct specular radiance (demodulated)")
-
----
-
-### NRD
-Not only demodulation radiance/reflectance, but NRD requires motionvector, normal, roughness and material ID. These inputs are provided by g-buffer.
-
-- Indirect + Direct diffuse filtered radiance
-![](docs/images/renderpass_capture/png/2023-05-12-16-33-29.png "Indirect + Direct diffuse filtered radiance")
-
-- Indirect + Direct specular filtered radiance
-![](docs/images/renderpass_capture/png/2023-05-12-16-34-33.png "Indirect + Direct specular filtered radiance")
-
----
-
-### ModulateIllumination & ToneMapper
-Modulate diffuse and specular, and then tone mapping.
-
-- Indirect + Direct estimated illumination
-![](docs/images/renderpass_capture/png/2023-05-12-16-37-25.png "Indirect + Direct estimated illumination")
-
----
-
-- Final output
-![](docs/images/renderpass_capture/Mogwai.ToneMapper.dst.27018.png "Final output")
-
-- Reference output by Falcor pathtracer (spp=100)
-![](docs/images/renderpass_capture/reference/Mogwai.ToneMapper.dst.43969.png "Refelence output")
-

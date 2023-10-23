@@ -26,7 +26,6 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #include "SceneBuilder.h"
-#include "SceneBuilderAccess.h"
 #include "SceneCache.h"
 #include "Importer.h"
 #include "Curves/CurveConfig.h"
@@ -37,9 +36,12 @@
 #include "Utils/Timing/TimeReport.h"
 #include "Utils/Scripting/ScriptBindings.h"
 #include "Utils/Math/MathHelpers.h"
+#include "Utils/ObjectIDPython.h"
+#include "Utils/NumericRange.h"
 #include <mikktspace.h>
 #include <filesystem>
 #include <cmath>
+#include <execution>
 
 namespace Falcor
 {
@@ -87,7 +89,7 @@ namespace Falcor
 
                 if (genTangSpaceDefault(&context) == false)
                 {
-                    throw RuntimeError("MikkTSpace failed to generate tangents for the mesh '{}'.", mesh.name);
+                    FALCOR_THROW("MikkTSpace failed to generate tangents for the mesh '{}'.", mesh.name);
                 }
 
                 return wrapper.mTangents;
@@ -136,14 +138,14 @@ namespace Falcor
             std::vector<float4> mTangents;
             std::vector<float3> mPositions;
             int32_t getFaceCount() const { return (int32_t)mMesh.faceCount; }
-            void getPosition(float position[], int32_t face, int32_t vert) const { FALCOR_ASSERT_LT(face * 3 + vert, (ssize_t)mPositions.size()); memcpy(position, mPositions.data() + (face * 3 + vert), sizeof(float3)); }
+            void getPosition(float position[], int32_t face, int32_t vert) const { FALCOR_ASSERT_LT(size_t(face) * 3 + vert, mPositions.size()); memcpy(position, mPositions.data() + (face * 3 + vert), sizeof(float3)); }
             void getNormal(float normal[], int32_t face, int32_t vert) { *reinterpret_cast<float3*>(normal) = mMesh.getNormal(face, vert); }
             void getTexCrd(float texCrd[], int32_t face, int32_t vert) { *reinterpret_cast<float2*>(texCrd) = mMesh.getTexCrd(face, vert); }
 
             void setTangent(const float tangent[], float sign, int32_t face, int32_t vert)
             {
                 float3 T = *reinterpret_cast<const float3*>(tangent);
-                mTangents[face * 3 + vert] = float4(glm::normalize(T), sign);
+                mTangents[face * 3 + vert] = float4(normalize(T), sign);
             }
         };
 
@@ -151,11 +153,11 @@ namespace Falcor
         {
             auto isInvalid = [](const auto& x)
             {
-                return glm::any(glm::isinf(x) || glm::isnan(x));
+                return any(isinf(x) || isnan(x));
             };
             auto isZero = [](const auto& x)
             {
-                return glm::length(x) < 1e-6f;
+                return length(x) < 1e-6f;
             };
 
             if (isInvalid(v.position) || isInvalid(v.normal) || isInvalid(v.tangent) || isInvalid(v.texCrd) || isInvalid(v.boneWeights)) invalidCount++;
@@ -164,15 +166,14 @@ namespace Falcor
 
         bool compareVertices(const SceneBuilder::Mesh::Vertex& lhs, const SceneBuilder::Mesh::Vertex& rhs, float threshold = 1e-6f)
         {
-            using namespace glm;
-            if (lhs.position != rhs.position) return false; // Position need to be exact to avoid cracks
+            if (any(lhs.position != rhs.position)) return false; // Position need to be exact to avoid cracks
             if (lhs.tangent.w != rhs.tangent.w) return false;
             if (lhs.curveRadius != rhs.curveRadius) return false;
-            if (lhs.boneIDs != rhs.boneIDs) return false;
-            if (any(greaterThan(abs(lhs.normal - rhs.normal), float3(threshold)))) return false;
-            if (any(greaterThan(abs(lhs.tangent.xyz - rhs.tangent.xyz), float3(threshold)))) return false;
-            if (any(greaterThan(abs(lhs.texCrd - rhs.texCrd), float2(threshold)))) return false;
-            if (any(greaterThan(abs(lhs.boneWeights - rhs.boneWeights), float4(threshold)))) return false;
+            if (any(lhs.boneIDs != rhs.boneIDs)) return false;
+            if (any(abs(lhs.normal - rhs.normal) > float3(threshold))) return false;
+            if (any(abs(lhs.tangent.xyz() - rhs.tangent.xyz()) > float3(threshold))) return false;
+            if (any(abs(lhs.texCrd - rhs.texCrd) > float2(threshold))) return false;
+            if (any(abs(lhs.boneWeights - rhs.boneWeights) > float4(threshold))) return false;
             return true;
         }
 
@@ -202,77 +203,123 @@ namespace Falcor
         }
     }
 
-    SceneBuilder::SceneBuilder(std::shared_ptr<Device> pDevice, const Settings& settings, Flags flags)
-        : mpDevice(std::move(pDevice))
+    SceneBuilder::SceneBuilder(ref<Device> pDevice, const Settings& settings, Flags flags)
+        : mpDevice(pDevice)
         , mSettings(settings)
         , mFlags(flags)
     {
-        mpFence = GpuFence::create(mpDevice.get());
-        mSceneData.pMaterials = MaterialSystem::create(mpDevice);
+        mAssetResolver = AssetResolver::getDefaultResolver();
+        mSceneData.pMaterials = std::make_unique<MaterialSystem>(mpDevice);
     }
 
-    SceneBuilder::SharedPtr SceneBuilder::create(std::shared_ptr<Device> pDevice, const Settings& settings, Flags flags)
+    SceneBuilder::SceneBuilder(ref<Device> pDevice, const std::filesystem::path& path, const Settings& settings, Flags flags)
+        : SceneBuilder(pDevice, settings, flags)
     {
-        return SharedPtr(new SceneBuilder(pDevice, settings, flags));
-    }
-
-    SceneBuilder::SharedPtr SceneBuilder::create(std::shared_ptr<Device> pDevice, const std::filesystem::path& path, const Settings& settings, Flags buildFlags)
-    {
-        std::filesystem::path fullPath;
-        if (!findFileInDataDirectories(path, fullPath))
+        std::filesystem::path resolvedPath = mAssetResolver.resolvePath(path, AssetCategory::Scene);
+        if (resolvedPath.empty())
         {
             throw ImporterError(path, "Can't find scene file '{}'.", path);
         }
 
-        auto pBuilder = create(pDevice, settings, buildFlags);
-
         // Compute scene cache key based on absolute scene path and build flags.
-        pBuilder->mSceneCacheKey = computeSceneCacheKey(fullPath, buildFlags);
+        mSceneCacheKey = computeSceneCacheKey(resolvedPath, flags);
 
         // Determine if scene cache should be written after import.
-        bool useCache = is_set(buildFlags, Flags::UseCache);
-        bool rebuildCache = is_set(buildFlags, Flags::RebuildCache);
-        pBuilder->mWriteSceneCache = useCache || rebuildCache;
+        bool useCache = is_set(flags, Flags::UseCache);
+        bool rebuildCache = is_set(flags, Flags::RebuildCache);
+        mWriteSceneCache = useCache || rebuildCache;
 
         // Try to load scene cache if supported, available and requested.
-        if (useCache && !rebuildCache && SceneCache::hasValidCache(pBuilder->mSceneCacheKey))
+        if (useCache && !rebuildCache && SceneCache::hasValidCache(mSceneCacheKey))
         {
             try
             {
-                pBuilder->mpScene = Scene::create(pDevice, SceneCache::readCache(pDevice, pBuilder->mSceneCacheKey));
-                return pBuilder;
+                mpScene = Scene::create(pDevice, SceneCache::readCache(pDevice, mSceneCacheKey));
+                return;
             }
             catch (const std::exception& e)
             {
-                throw ImporterError(fullPath, "Failed to load scene cache: {}", e.what());
+                throw ImporterError(resolvedPath, "Failed to load scene cache: {}", e.what());
             }
         }
 
-        pBuilder->import(path);
-        return pBuilder;
+        import(path);
     }
 
-    void SceneBuilder::import(const std::filesystem::path& path, const Dictionary& dict)
+    SceneBuilder::SceneBuilder(ref<Device> pDevice, const void* buffer, size_t byteSize, std::string_view extension, const Settings& settings, Flags flags)
+        : SceneBuilder(pDevice, settings, flags)
+    {
+        importFromMemory(buffer, byteSize, extension);
+    }
+
+    SceneBuilder::~SceneBuilder() {}
+
+    inline std::map<std::string, std::string> convertDictToMap(const pybind11::dict& dict_)
+    {
+        std::map<std::string, std::string> dict;
+        if (pybind11::isinstance<pybind11::dict>(dict_))
+        {
+            for (auto& it : dict_)
+            {
+                if (!pybind11::isinstance<pybind11::str>(it.first) || !pybind11::isinstance<pybind11::str>(it.second))
+                    continue;
+                dict[pybind11::str(it.first).cast<std::string>()] = pybind11::str(it.second).cast<std::string>();
+            }
+        }
+        return dict;
+    }
+
+    void SceneBuilder::import(const std::filesystem::path& path, const pybind11::dict& dict)
     {
         logInfo("Importing scene: {}", path);
-        std::filesystem::path fullPath;
-        if (!findFileInDataDirectories(path, fullPath))
+        std::map<std::string, std::string> materialToShortName = convertDictToMap(dict);
+
+        std::filesystem::path resolvedPath = mAssetResolver.resolvePath(path, AssetCategory::Scene);
+        if (resolvedPath.empty())
         {
             throw ImporterError(path, "Can't find scene file '{}'.", path);
         }
 
-        mSceneData.path = fullPath;
-        if (auto importer = Importer::create(getExtensionFromPath(fullPath)))
+        mSceneData.path = resolvedPath;
+        if (auto importer = Importer::create(getExtensionFromPath(resolvedPath)))
         {
-            importer->importScene(fullPath, *this, dict);
+            importer->importScene(resolvedPath, *this, materialToShortName);
         }
         else
         {
-            throw ImporterError(fullPath, "Unknown file extension.");
+            throw ImporterError(resolvedPath, "Unknown file extension.");
         }
     }
 
-    Scene::SharedPtr SceneBuilder::getScene()
+    void SceneBuilder::importFromMemory(const void* buffer, size_t byteSize, std::string_view extension, const pybind11::dict& dict)
+    {
+        logInfo("Importing scene from memory");
+        std::map<std::string, std::string> materialToShortName = convertDictToMap(dict);
+
+        mSceneData.path = "";
+        if (auto importer = Importer::create(extension))
+        {
+            importer->importSceneFromMemory(buffer, byteSize, extension, *this, materialToShortName);
+        }
+        else
+        {
+            throw ImporterError("", "Unknown file extension.");
+        }
+    }
+
+    void SceneBuilder::pushAssetResolver()
+    {
+        mAssetResolverStack.push_back(AssetResolver(mAssetResolver));
+    }
+
+    void SceneBuilder::popAssetResolver()
+    {
+        FALCOR_CHECK(mAssetResolverStack.size() > 0, "Asset resolver stack underflow.");
+        mAssetResolver = mAssetResolverStack.back();
+        mAssetResolverStack.pop_back();
+    }
+
+    ref<Scene> SceneBuilder::getScene()
     {
         if (mpScene) return mpScene;
 
@@ -288,7 +335,7 @@ namespace Falcor
             auto dummyMesh = TriangleMesh::createDummy();
             auto dummyMaterial = StandardMaterial::create(mpDevice, "Dummy");
             auto meshID = addTriangleMesh(dummyMesh, dummyMaterial);
-            Node dummyNode = { "Dummy", rmcv::identity<rmcv::mat4>(), rmcv::identity<rmcv::mat4>() };
+            Node dummyNode = { "Dummy", float4x4::identity(), float4x4::identity() };
             NodeID nodeID = addNode(dummyNode);
             addMeshInstance(nodeID, meshID);
         }
@@ -364,10 +411,10 @@ namespace Falcor
         return addProcessedMesh(processMesh(mesh));
     }
 
-    MeshID SceneBuilder::addTriangleMesh(const TriangleMesh::SharedPtr& pTriangleMesh, const Material::SharedPtr& pMaterial)
+    MeshID SceneBuilder::addTriangleMesh(const ref<TriangleMesh>& pTriangleMesh, const ref<Material>& pMaterial, bool isAnimated)
     {
-        checkArgument(pTriangleMesh != nullptr, "'pTriangleMesh' is missing");
-        checkArgument(pMaterial != nullptr, "'pMaterial' is missing");
+        FALCOR_CHECK(pTriangleMesh != nullptr, "'pTriangleMesh' is missing");
+        FALCOR_CHECK(pMaterial != nullptr, "'pMaterial' is missing");
 
         Mesh mesh;
 
@@ -382,6 +429,7 @@ namespace Falcor
         mesh.topology = Vao::Topology::TriangleList;
         mesh.isFrontFaceCW = pTriangleMesh->getFrontFaceCW();
         mesh.pMaterial = pMaterial;
+        mesh.isAnimated = isAnimated;
 
         std::vector<float3> positions(vertices.size());
         std::vector<float3> normals(vertices.size());
@@ -397,7 +445,7 @@ namespace Falcor
         return addMesh(mesh);
     }
 
-    SceneBuilder::ProcessedMesh SceneBuilder::processMesh(const Mesh& mesh_, MeshAttributeIndices* pAttributeIndices) const
+    SceneBuilder::ProcessedMesh SceneBuilder::processMesh(const Mesh& mesh_, MeshAttributeIndices* pAttributeIndices, std::vector<float4>* pTangents) const
     {
         // This function preprocesses a mesh into the final runtime representation.
         // Note the function needs to be thread safe. The following steps are performed:
@@ -415,12 +463,13 @@ namespace Falcor
         processedMesh.topology = mesh.topology;
         processedMesh.pMaterial = mesh.pMaterial;
         processedMesh.isFrontFaceCW = mesh.isFrontFaceCW;
+        processedMesh.isAnimated = mesh.isAnimated;
         processedMesh.skeletonNodeId = mesh.skeletonNodeId;
 
         // Error checking.
         auto throw_on_missing_element = [&](const std::string& element)
         {
-            throw RuntimeError("Error when adding the mesh '{}' to the scene. The mesh is missing {}.", mesh.name, element);
+            FALCOR_THROW("Error when adding the mesh '{}' to the scene. The mesh is missing {}.", mesh.name, element);
         };
 
         auto missing_element_warning = [&](const std::string& element)
@@ -428,13 +477,13 @@ namespace Falcor
             logWarning("The mesh '{}' is missing the element {}. This is not an error, the element will be filled with zeros which may result in incorrect rendering.", mesh.name, element);
         };
 
-        if (mesh.topology != Vao::Topology::TriangleList) throw RuntimeError("Error when adding the mesh '{}' to the scene. Only triangle list topology is supported.", mesh.name);
+        if (mesh.topology != Vao::Topology::TriangleList) FALCOR_THROW("Error when adding the mesh '{}' to the scene. Only triangle list topology is supported.", mesh.name);
         if (mesh.pMaterial == nullptr) throw_on_missing_element("material");
 
         if (mesh.faceCount == 0) throw_on_missing_element("faces");
         if (mesh.vertexCount == 0) throw_on_missing_element("vertices");
         if (mesh.indexCount == 0 || !mesh.pIndices) throw_on_missing_element("indices");
-        if (mesh.indexCount != mesh.faceCount * 3) throw RuntimeError("Error when adding the mesh '{}' to the scene. Unexpected face/vertex count.", mesh.name);
+        if (mesh.indexCount != mesh.faceCount * 3) FALCOR_THROW("Error when adding the mesh '{}' to the scene. Unexpected face/vertex count.", mesh.name);
 
         if (mesh.positions.pData == nullptr) throw_on_missing_element("positions");
         if (mesh.normals.pData == nullptr) missing_element_warning("normals");
@@ -447,33 +496,36 @@ namespace Falcor
         }
 
         // Generate tangent space if that's required.
-        std::vector<float4> tangents;
+        std::vector<float4> localTangents;
+        if (!pTangents)
+            pTangents = &localTangents;
         if (!(is_set(mFlags, Flags::UseOriginalTangentSpace) || mesh.useOriginalTangentSpace) || !mesh.tangents.pData)
         {
-            generateTangents(mesh, tangents);
+            generateTangents(mesh, *pTangents);
         }
 
         // Pretransform the texture coordinates, rather than transforming them at runtime.
         std::vector<float2> transformedTexCoords;
         if (mesh.texCrds.pData != nullptr)
         {
-            const rmcv::mat4 xform = mesh.pMaterial->getTextureTransform().getMatrix();
-            if (xform != rmcv::identity<rmcv::mat4>())
+            const float4x4 xform = mesh.pMaterial->getTextureTransform().getMatrix();
+            if (xform != float4x4::identity())
             {
                 size_t texCoordCount = mesh.getAttributeCount(mesh.texCrds);
                 transformedTexCoords.resize(texCoordCount);
                 // The given matrix transforms the texture (e.g., scaling > 1 enlarges the texture).
                 // Because we're transforming the input coordinates, apply the inverse.
-                const rmcv::mat4 invXform = rmcv::inverse(xform);
+                const float4x4 invXform = inverse(xform);
                 // Because texture transforms are 2D and affine, we only need apply the corresponding 3x2 matrix
-                rmcv::matrix<2,3, float> coordTransform;
-                coordTransform.setCol(0, invXform.getCol(0).xy);
-                coordTransform.setCol(1, invXform.getCol(1).xy);
-                coordTransform.setCol(2, invXform.getCol(3).xy);
+                math::matrix<float, 2, 3> coordTransform = matrixFromColumns(
+                    invXform.getCol(0).xy(),
+                    invXform.getCol(1).xy(),
+                    invXform.getCol(3).xy()
+                );
 
                 for (size_t i = 0; i < texCoordCount; ++i)
                 {
-                    transformedTexCoords[i] = coordTransform * float3(mesh.texCrds.pData[i], 1.f);
+                    transformedTexCoords[i] = mul(coordTransform, float3(mesh.texCrds.pData[i], 1.f));
                 }
                 mesh.texCrds.pData = transformedTexCoords.data();
             }
@@ -607,8 +659,8 @@ namespace Falcor
         }
 
         // Copy vertices into processed mesh.
-        processedMesh.staticData.reserve(vertexCount);
-        if (mesh.hasBones()) processedMesh.skinningData.reserve(vertexCount);
+        processedMesh.staticData.resize(vertexCount);
+        if (mesh.hasBones()) processedMesh.skinningData.resize(vertexCount);
 
         for (uint32_t i = 0; i < vertexCount; i++)
         {
@@ -616,13 +668,15 @@ namespace Falcor
             FALCOR_ASSERT(index < vertices.size());
             const Mesh::Vertex& v = vertices[index].first;
 
-            StaticVertexData s;
-            s.position = v.position;
-            s.normal = v.normal;
-            s.texCrd = v.texCrd;
-            s.tangent = v.tangent;
-            s.curveRadius = v.curveRadius;
-            processedMesh.staticData.push_back(s);
+            {
+                StaticVertexData s;
+                s.position = v.position;
+                s.normal = v.normal;
+                s.texCrd = v.texCrd;
+                s.tangent = v.tangent;
+                s.curveRadius = v.curveRadius;
+                processedMesh.staticData[i] = s;
+            }
 
             if (mesh.hasBones())
             {
@@ -632,14 +686,14 @@ namespace Falcor
                 s.staticIndex = i; // This references the local vertex here and gets updated in addProcessedMesh().
                 s.bindMatrixID = 0; // This will be initialized in createMeshData().
                 s.skeletonMatrixID = 0; // This will be initialized in createMeshData().
-                processedMesh.skinningData.push_back(s);
+                processedMesh.skinningData[i] = s;
             }
         }
 
         return processedMesh;
     }
 
-    void SceneBuilder::generateTangents(Mesh& mesh, std::vector<float4>& tangents) const
+    void SceneBuilder::generateTangents(Mesh& mesh, std::vector<float4>& tangents)
     {
         tangents = MikkTSpaceWrapper::generateTangents(mesh);
         if (!tangents.empty())
@@ -647,6 +701,24 @@ namespace Falcor
             FALCOR_ASSERT(tangents.size() == mesh.indexCount);
             mesh.tangents.pData = tangents.data();
             mesh.tangents.frequency = Mesh::AttributeFrequency::FaceVarying;
+
+            /// MikkTSpace can produces NaN tangents in case of degenerate triangles,
+            /// e.g. triangles where all three points, normals, and texture coordinates happen to be identical.
+            /// We are replacing these NaN tangents by arbitrary tangent orthonormal to the vertex normal
+            if (mesh.tangents.pData)
+            {
+                FALCOR_ASSERT(mesh.tangents.frequency == Mesh::AttributeFrequency::FaceVarying);
+                NumericRange<uint32_t> range(0, mesh.indexCount);
+                std::for_each(std::execution::par_unseq, range.begin(), range.end(), [&](uint32_t fvIndex)
+                {
+                    if (!any(isnan(mesh.tangents.pData[fvIndex])))
+                        return;
+                    uint32_t faceIndex = fvIndex / 3;
+                    uint32_t vertexIndex = fvIndex % 3;
+                    float3 normal = mesh.getNormal(faceIndex, vertexIndex);
+                    tangents[fvIndex] = float4(perp_stark(normal), 1.f);
+                });
+            }
         }
         else
         {
@@ -666,6 +738,7 @@ namespace Falcor
         spec.topology = mesh.topology;
         spec.materialId = addMaterial(mesh.pMaterial);
         spec.isFrontFaceCW = mesh.isFrontFaceCW;
+        spec.isAnimated = mesh.isAnimated;
         spec.skeletonNodeID = mesh.skeletonNodeId;
 
         spec.vertexCount = (uint32_t)mesh.staticData.size();
@@ -693,15 +766,22 @@ namespace Falcor
 
         if (mMeshes.size() > std::numeric_limits<uint32_t>::max())
         {
-            throw RuntimeError("Trying to build a scene that exceeds supported number of meshes");
+            FALCOR_THROW("Trying to build a scene that exceeds supported number of meshes");
         }
 
         return MeshID(mMeshes.size() - 1);
     }
 
-    void SceneBuilder::setCachedMeshes(std::vector<CachedMesh>&& cachedMeshes)
+    void SceneBuilder::addCachedMeshes(std::vector<CachedMesh>&& cachedMeshes)
     {
-        mSceneData.cachedMeshes = std::move(cachedMeshes);
+        mSceneData.cachedMeshes.reserve(mSceneData.cachedMeshes.size() + cachedMeshes.size());
+        for (auto&& it : cachedMeshes)
+            mSceneData.cachedMeshes.push_back(std::move(it));
+    }
+
+    void SceneBuilder::addCachedMesh(CachedMesh&& cachedMesh)
+    {
+        mSceneData.cachedMeshes.push_back(std::move(cachedMesh));
     }
 
     void SceneBuilder::addCustomPrimitive(uint32_t userID, const AABB& aabb)
@@ -710,7 +790,7 @@ namespace Falcor
         FALCOR_ASSERT(mSceneData.customPrimitiveDesc.size() == mSceneData.customPrimitiveAABBs.size());
         if (mSceneData.customPrimitiveAABBs.size() > std::numeric_limits<uint32_t>::max())
         {
-            throw RuntimeError("Custom primitive count exceeds the maximum");
+            FALCOR_THROW("Custom primitive count exceeds the maximum");
         }
 
         CustomPrimitiveDesc desc = {};
@@ -739,7 +819,7 @@ namespace Falcor
         // Error checking.
         auto throw_on_missing_element = [&](const std::string& element)
         {
-            throw RuntimeError("Error when adding the curve '{}' to the scene. The curve is missing {}.", curve.name, element);
+            FALCOR_THROW("Error when adding the curve '{}' to the scene. The curve is missing {}.", curve.name, element);
         };
 
         auto missing_element_warning = [&](const std::string& element)
@@ -759,7 +839,7 @@ namespace Falcor
         // Copy indices and vertices into processed curve.
         processedCurve.indexData.assign(curve.pIndices, curve.pIndices + curve.indexCount);
 
-        processedCurve.staticData.reserve(curve.vertexCount);
+        processedCurve.staticData.resize(curve.vertexCount);
         for (uint32_t i = 0; i < curve.vertexCount; i++)
         {
             StaticCurveVertexData s;
@@ -775,7 +855,7 @@ namespace Falcor
                 s.texCrd = float2(0.f);
             }
 
-            processedCurve.staticData.push_back(s);
+            processedCurve.staticData[i] = s;
         }
 
         return processedCurve;
@@ -802,18 +882,31 @@ namespace Falcor
 
         if (mCurves.size() > std::numeric_limits<uint32_t>::max())
         {
-            throw RuntimeError("Trying to build a scene that exceeds supported number of curves.");
+            FALCOR_THROW("Trying to build a scene that exceeds supported number of curves.");
         }
 
         return CurveID(mCurves.size() - 1);
     }
 
+    void SceneBuilder::addCachedCurves(std::vector<CachedCurve>&& cachedCurves)
+    {
+        mSceneData.cachedCurves.reserve(mSceneData.cachedCurves.size() + cachedCurves.size());
+        for (auto&& it : cachedCurves)
+            mSceneData.cachedCurves.push_back(std::move(it));
+    }
+
+    void SceneBuilder::addCachedCurve(CachedCurve&& cachedCurve)
+    {
+        mSceneData.cachedCurves.push_back(std::move(cachedCurve));
+    }
+
+
     // SDFs
 
-    SdfDescID SceneBuilder::addSDFGrid(const SDFGrid::SharedPtr& pSDFGrid, const Material::SharedPtr& pMaterial)
+    SdfDescID SceneBuilder::addSDFGrid(const ref<SDFGrid>& pSDFGrid, const ref<Material>& pMaterial)
     {
-        checkArgument(pSDFGrid != nullptr, "'pSDFGrid' is missing");
-        checkArgument(pMaterial != nullptr, "'pMaterial' is missing");
+        FALCOR_CHECK(pSDFGrid != nullptr, "'pSDFGrid' is missing");
+        FALCOR_CHECK(pMaterial != nullptr, "'pMaterial' is missing");
 
         Scene::SDFGridDesc desc;
         desc.materialID = addMaterial(pMaterial);
@@ -821,33 +914,34 @@ namespace Falcor
         mSceneData.sdfGrids.push_back(pSDFGrid);
 
         mSceneData.sdfGridDesc.push_back(desc);
-        mSceneData.sdfGridMaxLODCount = glm::max(bitScanReverse(pSDFGrid->getGridWidth()) + 1, mSceneData.sdfGridMaxLODCount);
+        mSceneData.sdfGridMaxLODCount = std::max(bitScanReverse(pSDFGrid->getGridWidth()) + 1, mSceneData.sdfGridMaxLODCount);
         return SdfDescID(mSceneData.sdfGridDesc.size() - 1);
     }
 
     // Materials
 
-    MaterialID SceneBuilder::addMaterial(const Material::SharedPtr& pMaterial)
+    MaterialID SceneBuilder::addMaterial(const ref<Material>& pMaterial)
     {
-        checkArgument(pMaterial != nullptr, "'pMaterial' is missing");
+        FALCOR_CHECK(pMaterial != nullptr, "'pMaterial' is missing");
         return mSceneData.pMaterials->addMaterial(pMaterial);
     }
 
-    void SceneBuilder::replaceMaterial(const Material::SharedPtr& pMaterial, const Material::SharedPtr& pReplacement)
+    void SceneBuilder::replaceMaterial(const ref<Material>& pMaterial, const ref<Material>& pReplacement)
     {
-        checkArgument(pMaterial != nullptr, "'pMaterial' is missing");
-        checkArgument(pReplacement != nullptr, "'pReplacement' is missing");
+        FALCOR_CHECK(pMaterial != nullptr, "'pMaterial' is missing");
+        FALCOR_CHECK(pReplacement != nullptr, "'pReplacement' is missing");
         mSceneData.pMaterials->replaceMaterial(pMaterial, pReplacement);
     }
 
-    void SceneBuilder::loadMaterialTexture(const Material::SharedPtr& pMaterial, Material::TextureSlot slot, const std::filesystem::path& path)
+    void SceneBuilder::loadMaterialTexture(const ref<Material>& pMaterial, Material::TextureSlot slot, const std::filesystem::path& path)
     {
-        checkArgument(pMaterial != nullptr, "'pMaterial' is missing");
+        FALCOR_CHECK(pMaterial != nullptr, "'pMaterial' is missing");
         if (!mpMaterialTextureLoader)
         {
             mpMaterialTextureLoader.reset(new MaterialTextureLoader(mSceneData.pMaterials->getTextureManager(), !is_set(mFlags, Flags::AssumeLinearSpaceTextures)));
         }
-        mpMaterialTextureLoader->loadTexture(pMaterial, slot, path);
+        std::filesystem::path resolvedPath = mAssetResolver.resolvePath(path);
+        mpMaterialTextureLoader->loadTexture(pMaterial, slot, resolvedPath);
     }
 
     void SceneBuilder::waitForMaterialTextureLoading()
@@ -857,7 +951,7 @@ namespace Falcor
 
     // GridVolumes
 
-    GridVolume::SharedPtr SceneBuilder::getGridVolume(const std::string& name) const
+    ref<GridVolume> SceneBuilder::getGridVolume(const std::string& name) const
     {
         for (const auto& pGridVolume : mSceneData.gridVolumes)
         {
@@ -866,10 +960,10 @@ namespace Falcor
         return nullptr;
     }
 
-    VolumeID SceneBuilder::addGridVolume(const GridVolume::SharedPtr& pGridVolume, NodeID nodeID)
+    VolumeID SceneBuilder::addGridVolume(const ref<GridVolume>& pGridVolume, NodeID nodeID)
     {
         FALCOR_ASSERT(pGridVolume);
-        checkArgument(nodeID == NodeID::Invalid() || nodeID.get() < mSceneGraph.size(), "'nodeID' ({}) is out of range", nodeID);
+        FALCOR_CHECK(nodeID == NodeID::Invalid() || nodeID.get() < mSceneGraph.size(), "'nodeID' ({}) is out of range", nodeID);
 
         if (nodeID != NodeID::Invalid())
         {
@@ -884,7 +978,7 @@ namespace Falcor
 
     // Lights
 
-    Light::SharedPtr SceneBuilder::getLight(const std::string& name) const
+    ref<Light> SceneBuilder::getLight(const std::string& name) const
     {
         for (const auto& pLight : mSceneData.lights)
         {
@@ -893,9 +987,9 @@ namespace Falcor
         return nullptr;
     }
 
-    LightID SceneBuilder::addLight(const Light::SharedPtr& pLight)
+    LightID SceneBuilder::addLight(const ref<Light>& pLight)
     {
-        checkArgument(pLight != nullptr, "'pLight' is missing");
+        FALCOR_CHECK(pLight != nullptr, "'pLight' is missing");
         mSceneData.lights.push_back(pLight);
         FALCOR_ASSERT(mSceneData.lights.size() <= std::numeric_limits<uint32_t>::max());
         return LightID(mSceneData.lights.size() - 1);
@@ -903,25 +997,25 @@ namespace Falcor
 
     void SceneBuilder::loadLightProfile(const std::string& filename, bool normalize)
     {
-        mSceneData.pLightProfile = LightProfile::createFromIesProfile(mpDevice, std::filesystem::path(filename), normalize);
+        mSceneData.pLightProfile = LightProfile::createFromIesProfile(mpDevice, mAssetResolver.resolvePath(std::filesystem::path(filename)), normalize);
     }
 
     // Cameras
 
-    CameraID SceneBuilder::addCamera(const Camera::SharedPtr& pCamera)
+    CameraID SceneBuilder::addCamera(const ref<Camera>& pCamera)
     {
-        checkArgument(pCamera != nullptr, "'pCamera' is missing");
+        FALCOR_CHECK(pCamera != nullptr, "'pCamera' is missing");
         mSceneData.cameras.push_back(pCamera);
         FALCOR_ASSERT(mSceneData.cameras.size() <= std::numeric_limits<uint32_t>::max());
         return CameraID(mSceneData.cameras.size() - 1);
     }
 
-    Camera::SharedPtr SceneBuilder::getSelectedCamera() const
+    ref<Camera> SceneBuilder::getSelectedCamera() const
     {
         return mSceneData.selectedCamera < mSceneData.cameras.size() ? mSceneData.cameras[mSceneData.selectedCamera] : nullptr;
     }
 
-    void SceneBuilder::setSelectedCamera(const Camera::SharedPtr& pCamera)
+    void SceneBuilder::setSelectedCamera(const ref<Camera>& pCamera)
     {
         auto it = std::find(mSceneData.cameras.begin(), mSceneData.cameras.end(), pCamera);
         mSceneData.selectedCamera = it != mSceneData.cameras.end() ? (uint32_t)std::distance(mSceneData.cameras.begin(), it) : 0;
@@ -929,15 +1023,15 @@ namespace Falcor
 
     // Animations
 
-    void SceneBuilder::addAnimation(const Animation::SharedPtr& pAnimation)
+    void SceneBuilder::addAnimation(const ref<Animation>& pAnimation)
     {
-        checkArgument(pAnimation != nullptr, "'pAnimation' is missing");
+        FALCOR_CHECK(pAnimation != nullptr, "'pAnimation' is missing");
         mSceneData.animations.push_back(pAnimation);
     }
 
-    Animation::SharedPtr SceneBuilder::createAnimation(Animatable::SharedPtr pAnimatable, const std::string& name, double duration)
+    ref<Animation> SceneBuilder::createAnimation(ref<Animatable> pAnimatable, const std::string& name, double duration)
     {
-        checkArgument(pAnimatable != nullptr, "'pAnimatable' is missing");
+        FALCOR_CHECK(pAnimatable != nullptr, "'pAnimatable' is missing");
 
         NodeID nodeID = pAnimatable->getNodeID();
 
@@ -946,7 +1040,7 @@ namespace Falcor
             logWarning("Animatable object is already animated.");
             return nullptr;
         }
-        if (nodeID == NodeID::Invalid()) nodeID = addNode(Node{ name, rmcv::identity<rmcv::mat4>(), rmcv::identity<rmcv::mat4>() });
+        if (nodeID == NodeID::Invalid()) nodeID = addNode(Node{ name, float4x4::identity(), float4x4::identity() });
 
         pAnimatable->setNodeID(nodeID);
         pAnimatable->setHasAnimation(true);
@@ -962,17 +1056,17 @@ namespace Falcor
     NodeID SceneBuilder::addNode(const Node& node)
     {
         // Validate node.
-        auto validateMatrix = [&](rmcv::mat4 m, const char* field)
+        auto validateMatrix = [&](float4x4 m, const char* field)
         {
             if (!isMatrixValid(m))
             {
-                throw RuntimeError("Node '{}' {} matrix has inf/nan values", node.name, field);
+                FALCOR_THROW("Node '{}' {} matrix has inf/nan values", node.name, field);
             }
             // Check the assumption that transforms are affine. Note that glm is column-major.
             if (!isMatrixAffine(m))
             {
                 logWarning("SceneBuilder::addNode() - Node '{}' {} matrix is not affine. Setting last row to (0,0,0,1).", node.name, field);
-                m[3] = rmcv::vec4(0, 0, 0, 1);
+                m[3] = float4(0, 0, 0, 1);
             }
             return m;
         };
@@ -982,8 +1076,8 @@ namespace Falcor
         internalNode.localToBindPose = validateMatrix(node.localToBindPose, "localToBindPose");
 
         static_assert(NodeID::kInvalidID >= std::numeric_limits<uint32_t>::max());
-        if (node.parent.isValid() && node.parent.get() >= mSceneGraph.size()) throw RuntimeError("Node parent is out of range");
-        if (mSceneGraph.size() >= std::numeric_limits<NodeID::IntType>::max()) throw RuntimeError("Scene graph is too large");
+        if (node.parent.isValid() && node.parent.get() >= mSceneGraph.size()) FALCOR_THROW("Node parent is out of range");
+        if (mSceneGraph.size() >= std::numeric_limits<NodeID::IntType>::max()) FALCOR_THROW("Scene graph is too large");
 
         // Add node to scene graph.
         NodeID newNodeID{ mSceneGraph.size() };
@@ -995,8 +1089,8 @@ namespace Falcor
 
     void SceneBuilder::addMeshInstance(NodeID nodeID, MeshID meshID)
     {
-        checkArgument(nodeID.get() < mSceneGraph.size(), "'nodeID' ({}) is out of range", nodeID);
-        checkArgument(meshID.get() < mMeshes.size(), "'meshID' ({}) is out of range", meshID);
+        FALCOR_CHECK(nodeID.get() < mSceneGraph.size(), "'nodeID' ({}) is out of range", nodeID);
+        FALCOR_CHECK(meshID.get() < mMeshes.size(), "'meshID' ({}) is out of range", meshID);
 
         mSceneGraph[nodeID.get()].meshes.push_back(meshID);
         mMeshes[meshID.get()].instances.insert(nodeID);
@@ -1004,8 +1098,8 @@ namespace Falcor
 
     void SceneBuilder::addCurveInstance(NodeID nodeID, CurveID curveID)
     {
-        checkArgument(nodeID.get() < mSceneGraph.size(), "'nodeID' ({}) is out of range", nodeID);
-        checkArgument(curveID.get() < mCurves.size(), "'curveID' ({}) is out of range", curveID);
+        FALCOR_CHECK(nodeID.get() < mSceneGraph.size(), "'nodeID' ({}) is out of range", nodeID);
+        FALCOR_CHECK(curveID.get() < mCurves.size(), "'curveID' ({}) is out of range", curveID);
 
         mSceneGraph[nodeID.get()].curves.push_back(curveID);
         mCurves[curveID.get()].instances.insert(nodeID);
@@ -1013,8 +1107,8 @@ namespace Falcor
 
     void SceneBuilder::addSDFGridInstance(NodeID nodeID, SdfDescID sdfGridID)
     {
-        checkArgument(nodeID.get() < mSceneGraph.size(), "'nodeID' ({}) is out of range", nodeID);
-        checkArgument(sdfGridID.get() < mSceneData.sdfGridDesc.size(), "'sdfGridID' ({}) is out of range", sdfGridID);
+        FALCOR_CHECK(nodeID.get() < mSceneGraph.size(), "'nodeID' ({}) is out of range", nodeID);
+        FALCOR_CHECK(sdfGridID.get() < mSceneData.sdfGridDesc.size(), "'sdfGridID' ({}) is out of range", sdfGridID);
 
         Scene::SDFGridDesc& desc = mSceneData.sdfGridDesc[sdfGridID.get()];
         mSceneGraph[nodeID.get()].sdfGrids.push_back(desc.sdfGridID);
@@ -1129,7 +1223,7 @@ namespace Falcor
 
         // Compute the combined transform.
         auto& child = mSceneGraph[childNodeID.get()];
-        rmcv::mat4 transform = child.transform;
+        float4x4 transform = child.transform;
         NodeID prevNodeID = childNodeID;
         NodeID nodeID = child.parent;
 
@@ -1148,7 +1242,7 @@ namespace Falcor
             FALCOR_ASSERT(node.children[0] == prevNodeID);
 
             // Update the transform and step to the parent.
-            transform = node.transform * transform;
+            transform = mul(node.transform, transform);
 
             if (nodeID == parentNodeID) break;
             prevNodeID = nodeID;
@@ -1248,7 +1342,7 @@ namespace Falcor
         auto addAnimatable = [this](Animatable* pObject, const std::string& name) {
             if (auto nodeID = pObject->getNodeID(); nodeID != NodeID::Invalid())
             {
-                if (nodeID.get() >= mSceneGraph.size()) throw RuntimeError("Invalid node ID in animatable object named '{}'", name);
+                if (nodeID.get() >= mSceneGraph.size()) FALCOR_THROW("Invalid node ID in animatable object named '{}'", name);
                 mSceneGraph[nodeID.get()].animatable.push_back(pObject);
             }
         };
@@ -1271,7 +1365,11 @@ namespace Falcor
         // Initialize any mesh properties that depend on the scene modifications to be finished.
 
         // Set mesh properties related to vertex animations
-        for (auto& m : mMeshes) m.isAnimated = false;
+        for (auto& mesh : mMeshes)
+        {
+            if (mesh.isAnimated)
+                mesh.prevVertexCount = mesh.staticVertexCount;
+        }
         for (auto& cache : mSceneData.cachedMeshes)
         {
             auto& mesh = mMeshes[cache.meshID.get()];
@@ -1421,12 +1519,12 @@ namespace Falcor
                 // Compute the object->world transform for the node.
                 FALCOR_ASSERT(nodeID != NodeID::Invalid());
 
-                rmcv::mat4 transform = rmcv::identity<rmcv::mat4>();
+                float4x4 transform = float4x4::identity();
                 NodeID curID = nodeID;
                 while (curID != NodeID::Invalid())
                 {
                     FALCOR_ASSERT_LT(curID.get(), mSceneGraph.size());
-                    transform = mSceneGraph[curID.get()].transform * transform;
+                    transform = mul(mSceneGraph[curID.get()].transform, transform);
 
                     curID = mSceneGraph[curID.get()].parent;
                 }
@@ -1440,7 +1538,7 @@ namespace Falcor
                 prevNode.meshes.erase(it);
 
                 // Link mesh to new top-level node.
-                NodeID newNodeID      = addNode(Node{newMesh->name, transform, rmcv::identity<rmcv::mat4>()});
+                NodeID newNodeID      = addNode(Node{newMesh->name, transform, float4x4::identity()});
                 InternalNode& newNode = mSceneGraph[newNodeID.get()];
 
                 if (*instIter == *mesh.instances.rbegin() && newInstances.empty())
@@ -1502,8 +1600,8 @@ namespace Falcor
         // We build a set of unique nodes. If a node is identical to one of the
         // existing nodes, its contents are merged into the matching node.
 
-        auto lessThan = [](const rmcv::mat4& lhs, const rmcv::mat4& rhs) {
-            return rmcv::lex_lt(lhs, rhs);
+        auto lessThan = [](const float4x4& lhs, const float4x4& rhs) {
+            return math::lex_lt(lhs, rhs);
         };
 
         // Comparison for strict weak ordering of scene graph nodes w r t to the fields we care about.
@@ -1533,7 +1631,7 @@ namespace Falcor
             if (it != uniqueStaticNodes.end())
             {
                 bool merged = mergeNodes(*it, nodeID);
-                if (!merged) throw RuntimeError("Unexpectedly failed to merge nodes");
+                if (!merged) FALCOR_THROW("Unexpectedly failed to merge nodes");
                 mergedNodesCount++;
             }
             else
@@ -1552,7 +1650,7 @@ namespace Falcor
         // This step is a prerequisite for the ray tracing optimizations we do later.
 
         // Add an identity transform node.
-        NodeID identityNodeID = addNode(Node{ "Identity", rmcv::identity<rmcv::mat4>(), rmcv::identity<rmcv::mat4>() });
+        NodeID identityNodeID = addNode(Node{ "Identity", float4x4::identity(), float4x4::identity() });
         auto& identityNode = mSceneGraph[identityNodeID.get()];
 
         size_t transformedMeshCount = 0;
@@ -1571,38 +1669,37 @@ namespace Falcor
             auto nodeID = *mesh.instances.begin();
             FALCOR_ASSERT(nodeID != NodeID::Invalid());
 
-            rmcv::mat4 transform = rmcv::identity<rmcv::mat4>();
+            float4x4 transform = float4x4::identity();
             while (nodeID != NodeID::Invalid())
             {
                 FALCOR_ASSERT_LT(nodeID.get(), mSceneGraph.size());
-                transform = mSceneGraph[nodeID.get()].transform * transform;
+                transform = mul(mSceneGraph[nodeID.get()].transform, transform);
 
                 nodeID = mSceneGraph[nodeID.get()].parent;
             }
 
             // Flip triangle winding flag if the transform flips the coordinate system handedness (negative determinant).
-            bool flippedWinding = rmcv::determinant((rmcv::mat3)transform) < 0.f;
+            bool flippedWinding = determinant(float3x3(transform)) < 0.f;
             if (flippedWinding) mesh.isFrontFaceCW = !mesh.isFrontFaceCW;
 
             // Transform vertices to world space if not already identity transform.
-            if (transform != rmcv::identity<rmcv::mat4>())
+            if (transform != float4x4::identity())
             {
                 FALCOR_ASSERT(!mesh.staticData.empty());
                 FALCOR_ASSERT((size_t)mesh.vertexCount == mesh.staticData.size());
 
-                rmcv::mat3 invTranspose3x3 = (rmcv::mat3)rmcv::transpose(rmcv::inverse(transform));
-                rmcv::mat3 transform3x3 = (rmcv::mat3)transform;
+                float3x3 invTranspose3x3 = float3x3(transpose(inverse(transform)));
+                float3x3 transform3x3 = float3x3(transform);
 
                 for (auto& v : mesh.staticData)
                 {
-                    float4 p = transform * float4(v.position, 1.f);
-                    v.position = p.xyz;
-                    v.normal = glm::normalize(invTranspose3x3 * v.normal);
-                    v.tangent.xyz = glm::normalize(transform3x3 * float3(v.tangent.xyz)); // TODO: This cast shouldn't be necessary
+                    v.position = transformPoint(transform, v.position);
+                    v.normal = normalize(transformVector(invTranspose3x3, v.normal));
+                    v.tangent = float4(normalize(transformVector(transform3x3, v.tangent.xyz())), v.tangent.w);
                     // TODO: We should flip the sign of v.tangent.w if flippedWinding is true.
                     // Leaving that out for now for consistency with the shader code that needs the same fix.
 
-                    v.curveRadius = glm::length(transform3x3 * float3(v.curveRadius, 0.f, 0.f));
+                    v.curveRadius = length(transformVector(transform3x3, float3(v.curveRadius, 0.f, 0.f)));
                 }
 
                 transformedMeshCount++;
@@ -1633,7 +1730,7 @@ namespace Falcor
         // Note that both static and dynamic vertices have to be swapped for dynamic meshes.
         if (mesh.indexCount == 0)
         {
-            throw RuntimeError("SceneBuilder::flipTriangleWinding() is not implemented for non-indexed meshes");
+            FALCOR_THROW("SceneBuilder::flipTriangleWinding() is not implemented for non-indexed meshes");
         }
 
         // Flip winding of indexed mesh by swapping vertex index 0 and 1 for each triangle.
@@ -1815,7 +1912,7 @@ namespace Falcor
             displacedInstancedCount += it.second.size();
         }
         if ((instancedCount + displacedInstancedCount) != instancedMeshCount ||
-            (instancedMeshes.size() + displacedInstancedMeshes.size()) != instancedMeshCount) throw RuntimeError("Error in instanced mesh grouping logic");
+            (instancedMeshes.size() + displacedInstancedMeshes.size()) != instancedMeshCount) FALCOR_THROW("Error in instanced mesh grouping logic");
 
         logInfo("Found {} static non-instanced meshes, arranged in 1 mesh group.", staticMeshes.size());
         logInfo("Found {} displaced non-instanced meshes, arranged in 1 mesh group.", staticDisplacedMeshes.size());
@@ -1887,11 +1984,11 @@ namespace Falcor
         // Check if mesh is supported.
         if (mesh.isDynamic())
         {
-            throw RuntimeError("Cannot split mesh '{}', only non-dynamic meshes supported", mesh.name);
+            FALCOR_THROW("Cannot split mesh '{}', only non-dynamic meshes supported", mesh.name);
         }
         if (mesh.topology != Vao::Topology::TriangleList)
         {
-            throw RuntimeError("Cannot split mesh '{}', only triangle list topology supported", mesh.name);
+            FALCOR_THROW("Cannot split mesh '{}', only triangle list topology supported", mesh.name);
         }
 
         // Early out if mesh is fully on either side of the splitting plane.
@@ -2012,7 +2109,7 @@ namespace Falcor
     void SceneBuilder::splitNonIndexedMesh(const MeshSpec& mesh, MeshSpec& leftMesh, MeshSpec& rightMesh, const int axis, const float pos)
     {
         FALCOR_ASSERT(mesh.indexCount == 0 && mesh.indexData.empty());
-        throw RuntimeError("SceneBuilder::splitNonIndexedMesh() not implemented");
+        FALCOR_THROW("SceneBuilder::splitNonIndexedMesh() not implemented");
     }
 
     size_t SceneBuilder::countTriangles(const MeshGroup& meshGroup) const
@@ -2312,7 +2409,7 @@ namespace Falcor
             totalStaticVertexCount > std::numeric_limits<uint32_t>::max() ||
             totalSkinningVertexCount > std::numeric_limits<uint32_t>::max())
         {
-            throw RuntimeError("Trying to build a scene that exceeds supported mesh data size.");
+            FALCOR_THROW("Trying to build a scene that exceeds supported mesh data size.");
         }
 
         mSceneData.meshIndexData.reserve(totalIndexDataCount);
@@ -2392,7 +2489,7 @@ namespace Falcor
         if (totalIndexDataCount > std::numeric_limits<uint32_t>::max() ||
             totalStaticCurveVertexCount > std::numeric_limits<uint32_t>::max())
         {
-            throw RuntimeError("Trying to build a scene that exceeds supported curve data size.");
+            FALCOR_THROW("Trying to build a scene that exceeds supported curve data size.");
         }
 
         mSceneData.curveIndexData.reserve(totalIndexDataCount);
@@ -2459,13 +2556,13 @@ namespace Falcor
     void SceneBuilder::collectVolumeGrids()
     {
         // Collect grids from volumes.
-        std::set<Grid::SharedPtr> uniqueGrids;
+        std::set<ref<Grid>> uniqueGrids;
         for (auto& pGridVolume : mSceneData.gridVolumes)
         {
             auto grids = pGridVolume->getAllGrids();
             uniqueGrids.insert(grids.begin(), grids.end());
         }
-        mSceneData.grids = std::vector<Grid::SharedPtr>(uniqueGrids.begin(), uniqueGrids.end());
+        mSceneData.grids = std::vector<ref<Grid>>(uniqueGrids.begin(), uniqueGrids.end());
     }
 
     void SceneBuilder::quantizeTexCoords()
@@ -2504,7 +2601,7 @@ namespace Falcor
                     // Compute maximum quantization error in texels.
                     // The texcoords are used for all texture channels so taking the maximum dimensions.
                     uint2 maxTexDim = pMaterial->getMaxTextureDimensions();
-                    maxError *= maxTexDim;
+                    maxError *= float2(maxTexDim);
                     float maxTexelError = std::max(maxError.x, maxError.y);
 
                     if (maxTexelError > kMaxTexelError)
@@ -2525,7 +2622,7 @@ namespace Falcor
     {
         // Removes duplicate SDF grids.
 
-        std::vector<SDFGrid::SharedPtr> uniqueSDFGrids;
+        std::vector<ref<SDFGrid>> uniqueSDFGrids;
         std::unordered_set<SdfGridID> removedIDs;
 
         for (SdfGridID i{ 0 }; i.get() < mSceneData.sdfGrids.size(); ++i)
@@ -2533,7 +2630,7 @@ namespace Falcor
             if (removedIDs.count(i) > 0)
                 continue;
 
-            const SDFGrid::SharedPtr& pSDFGridA = mSceneData.sdfGrids[i.get()];
+            const ref<SDFGrid>& pSDFGridA = mSceneData.sdfGrids[i.get()];
             uniqueSDFGrids.push_back(pSDFGridA);
 
             if (removedIDs.size() > 0)
@@ -2541,7 +2638,7 @@ namespace Falcor
 
             for (SdfGridID j{ i.get() + 1 }; j.get() < mSceneData.sdfGrids.size(); ++j)
             {
-                const SDFGrid::SharedPtr& pSDFGridB = mSceneData.sdfGrids[j.get()];
+                const ref<SDFGrid>& pSDFGridB = mSceneData.sdfGrids[j.get()];
 
                 if (pSDFGridA == pSDFGridB)
                 {
@@ -2742,7 +2839,7 @@ namespace Falcor
         {
             const auto& curve = mCurves[curveID];
             size_t instanceCount = curve.instances.size();
-            if (instanceCount > 1) throw RuntimeError("Instanced curves are currently not supported!");
+            if (instanceCount > 1) FALCOR_THROW("Instanced curves are currently not supported!");
             maxInstanceCount = std::max(maxInstanceCount, instanceCount);
             auto instIter = curve.instances.cbegin();
             for (size_t instanceIdx = 0; instanceIdx < instanceCount; instanceIdx++, instIter++)
@@ -2807,20 +2904,6 @@ namespace Falcor
         }
     }
 
-    static SceneBuilder* spActivePythonSceneBuilder; // TODO: REMOVEGLOBAL
-
-    void setActivePythonSceneBuilder(SceneBuilder* pSceneBuilder)
-    {
-        spActivePythonSceneBuilder = pSceneBuilder;
-    }
-
-    SceneBuilder& getActivePythonSceneBuilder()
-    {
-        if (!spActivePythonSceneBuilder)
-            throw RuntimeError("This can only be called in a Python scene building context!");
-        return *spActivePythonSceneBuilder;
-    }
-
     FALCOR_SCRIPT_BINDING(SceneBuilder)
     {
         using namespace pybind11::literals;
@@ -2834,6 +2917,8 @@ namespace Falcor
         FALCOR_SCRIPT_BINDING_DEPENDENCY(Animation)
         FALCOR_SCRIPT_BINDING_DEPENDENCY(AABB)
         FALCOR_SCRIPT_BINDING_DEPENDENCY(GridVolume)
+        FALCOR_SCRIPT_BINDING_DEPENDENCY(Settings)
+        FALCOR_SCRIPT_BINDING_DEPENDENCY(AssetResolver)
 
         pybind11::enum_<SceneBuilder::Flags> flags(m, "SceneBuilderFlags");
         flags.value("Default", SceneBuilder::Flags::Default);
@@ -2858,7 +2943,7 @@ namespace Falcor
         flags.value("RebuildCache", SceneBuilder::Flags::RebuildCache);
         ScriptBindings::addEnumBinaryOperators(flags);
 
-        pybind11::class_<SceneBuilder, SceneBuilder::SharedPtr> sceneBuilder(m, "SceneBuilder");
+        pybind11::class_<SceneBuilder> sceneBuilder(m, "SceneBuilder");
         sceneBuilder.def_property_readonly("flags", &SceneBuilder::getFlags);
         sceneBuilder.def_property_readonly("materials", &SceneBuilder::getMaterials);
         sceneBuilder.def_property_readonly("gridVolumes", &SceneBuilder::getGridVolumes);
@@ -2870,10 +2955,8 @@ namespace Falcor
         sceneBuilder.def_property("envMap", &SceneBuilder::getEnvMap, &SceneBuilder::setEnvMap);
         sceneBuilder.def_property("selectedCamera", &SceneBuilder::getSelectedCamera, &SceneBuilder::setSelectedCamera);
         sceneBuilder.def_property("cameraSpeed", &SceneBuilder::getCameraSpeed, &SceneBuilder::setCameraSpeed);
-        sceneBuilder.def("importScene", [] (SceneBuilder* pSceneBuilder, const std::filesystem::path& path, const pybind11::dict& dict) {
-            pSceneBuilder->import(path, Dictionary(dict));
-        }, "path"_a, "dict"_a = pybind11::dict());
-        sceneBuilder.def("addTriangleMesh", &SceneBuilder::addTriangleMesh, "triangleMesh"_a, "material"_a);
+        sceneBuilder.def("importScene", &SceneBuilder::import, "path"_a, "dict"_a = pybind11::dict());
+        sceneBuilder.def("addTriangleMesh", &SceneBuilder::addTriangleMesh, "triangleMesh"_a, "material"_a, "isAnimated"_a = false);
         sceneBuilder.def("addSDFGrid", &SceneBuilder::addSDFGrid, "sdfGrid"_a, "material"_a);
         sceneBuilder.def("addMaterial", &SceneBuilder::addMaterial, "material"_a);
         sceneBuilder.def("replaceMaterial", &SceneBuilder::replaceMaterial, "material"_a, "replacement"_a);
@@ -2891,7 +2974,7 @@ namespace Falcor
         sceneBuilder.def("addAnimation", &SceneBuilder::addAnimation, "animation"_a);
         sceneBuilder.def("createAnimation", &SceneBuilder::createAnimation, "animatable"_a, "name"_a, "duration"_a);
         sceneBuilder.def("addNode", [] (SceneBuilder* pSceneBuilder, const std::string& name, const Transform& transform, NodeID parent) {
-            checkArgument(pSceneBuilder, "'pSceneBuilder' is missing");
+            FALCOR_CHECK(pSceneBuilder, "'pSceneBuilder' is missing");
             SceneBuilder::Node node;
             node.name = name;
             node.transform = transform.getMatrix();
@@ -2903,5 +2986,6 @@ namespace Falcor
         sceneBuilder.def("addCustomPrimitive", &SceneBuilder::addCustomPrimitive);
 
         sceneBuilder.def("getSettings", static_cast<Settings&(SceneBuilder::*)()>(&SceneBuilder::getSettings), pybind11::return_value_policy::reference);
+        sceneBuilder.def_property_readonly("assetResolver", &SceneBuilder::getAssetResolver, pybind11::return_value_policy::reference);
     }
 }

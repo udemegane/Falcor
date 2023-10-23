@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-21, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -43,7 +43,7 @@ struct MeshLightData
     uint        triangleCount       = 0;                ///< Number of triangles in mesh light.
     uint        materialID          = kInvalidIndex;    ///< Material ID (index into scene.materials array).
 
-    static const uint kInvalidIndex = 0xffffffff;
+    static constexpr uint kInvalidIndex = 0xffffffff;
 };
 
 END_NAMESPACE_FALCOR

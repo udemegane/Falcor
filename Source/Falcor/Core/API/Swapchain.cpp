@@ -33,15 +33,14 @@
 namespace Falcor
 {
 
-Swapchain::Swapchain(std::shared_ptr<Device> pDevice, const Desc& desc, WindowHandle windowHandle)
-    : mpDevice(std::move(pDevice)), mDesc(desc)
+Swapchain::Swapchain(ref<Device> pDevice, const Desc& desc, WindowHandle windowHandle) : mpDevice(pDevice), mDesc(desc)
 {
     FALCOR_ASSERT(mpDevice);
 
-    FALCOR_CHECK_ARG_NE((uint32_t)desc.format, (uint32_t)ResourceFormat::Unknown);
-    FALCOR_CHECK_ARG_GT(desc.width, 0);
-    FALCOR_CHECK_ARG_GT(desc.height, 0);
-    FALCOR_CHECK_ARG_GT(desc.imageCount, 0);
+    FALCOR_CHECK(desc.format != ResourceFormat::Unknown, "Invalid format");
+    FALCOR_CHECK(desc.width > 0, "Invalid width");
+    FALCOR_CHECK(desc.height > 0, "Invalid height");
+    FALCOR_CHECK(desc.imageCount > 0, "Invalid image count");
 
     gfx::ISwapchain::Desc gfxDesc = {};
     gfxDesc.format = getGFXFormat(desc.format);
@@ -60,7 +59,7 @@ Swapchain::Swapchain(std::shared_ptr<Device> pDevice, const Desc& desc, WindowHa
     prepareImages();
 }
 
-const Texture::SharedPtr& Swapchain::getImage(uint32_t index) const
+const ref<Texture>& Swapchain::getImage(uint32_t index) const
 {
     FALCOR_ASSERT(index <= mImages.size());
     return mImages[index];
@@ -78,11 +77,11 @@ int Swapchain::acquireNextImage()
 
 void Swapchain::resize(uint32_t width, uint32_t height)
 {
-    FALCOR_CHECK_ARG_GT(width, 0);
-    FALCOR_CHECK_ARG_GT(height, 0);
+    FALCOR_CHECK(width > 0, "Invalid width");
+    FALCOR_CHECK(height > 0, "Invalid height");
 
     mImages.clear();
-    mpDevice->flushAndSync();
+    mpDevice->wait();
     FALCOR_GFX_CALL(mGfxSwapchain->resize(width, height));
     prepareImages();
 }
@@ -103,9 +102,18 @@ void Swapchain::prepareImages()
     {
         Slang::ComPtr<gfx::ITextureResource> resource;
         FALCOR_GFX_CALL(mGfxSwapchain->getImage(i, resource.writeRef()));
-        mImages.push_back(Texture::createFromResource(
-            mpDevice.get(), resource, Texture::Type::Texture2D, mDesc.width, mDesc.height, 1, mDesc.format, 1, 1, 1,
-            Resource::State::Undefined, Texture::BindFlags::RenderTarget
+        mImages.push_back(mpDevice->createTextureFromResource(
+            resource,
+            Texture::Type::Texture2D,
+            mDesc.format,
+            mDesc.width,
+            mDesc.height,
+            1,
+            1,
+            1,
+            1,
+            ResourceBindFlags::RenderTarget,
+            Resource::State::Undefined
         ));
     }
 }

@@ -26,8 +26,7 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #include "ProgramVars.h"
-#include "GraphicsProgram.h"
-#include "ComputeProgram.h"
+#include "Program.h"
 #include "Core/API/Device.h"
 #include "Core/API/ComputeContext.h"
 #include "Core/API/RenderContext.h"
@@ -41,84 +40,39 @@
 namespace Falcor
 {
 
-ProgramVars::ProgramVars(std::shared_ptr<Device> pDevice, const ProgramReflection::SharedConstPtr& pReflector)
-    : ParameterBlock(std::move(pDevice), pReflector), mpReflector(pReflector)
+ProgramVars::ProgramVars(ref<Device> pDevice, const ref<const ProgramReflection>& pReflector)
+    : ParameterBlock(pDevice, pReflector), mpReflector(pReflector)
 {
     FALCOR_ASSERT(pReflector);
 }
 
-GraphicsVars::GraphicsVars(std::shared_ptr<Device> pDevice, const ProgramReflection::SharedConstPtr& pReflector)
-    : ProgramVars(std::move(pDevice), pReflector)
-{}
-
-GraphicsVars::SharedPtr GraphicsVars::create(std::shared_ptr<Device> pDevice, const ProgramReflection::SharedConstPtr& pReflector)
+ref<ProgramVars> ProgramVars::create(ref<Device> pDevice, const ref<const ProgramReflection>& pReflector)
 {
-    if (pReflector == nullptr)
-        throw ArgumentError("Can't create a GraphicsVars object without a program reflector");
-    return SharedPtr(new GraphicsVars(std::move(pDevice), pReflector));
+    FALCOR_CHECK(pReflector, "Can't create a ProgramVars object without a program reflector");
+    return ref<ProgramVars>(new ProgramVars(pDevice, pReflector));
 }
 
-GraphicsVars::SharedPtr GraphicsVars::create(std::shared_ptr<Device> pDevice, const GraphicsProgram* pProg)
+ref<ProgramVars> ProgramVars::create(ref<Device> pDevice, const Program* pProg)
 {
-    if (pProg == nullptr)
-        throw ArgumentError("Can't create a GraphicsVars object without a program");
-    return create(std::move(pDevice), pProg->getReflector());
+    FALCOR_CHECK(pProg, "Can't create a ProgramVars object without a program");
+    return create(pDevice, pProg->getReflector());
 }
 
-ComputeVars::SharedPtr ComputeVars::create(std::shared_ptr<Device> pDevice, const ProgramReflection::SharedConstPtr& pReflector)
-{
-    if (pReflector == nullptr)
-        throw ArgumentError("Can't create a ComputeVars object without a program reflector");
-    return SharedPtr(new ComputeVars(std::move(pDevice), pReflector));
-}
-
-ComputeVars::SharedPtr ComputeVars::create(std::shared_ptr<Device> pDevice, const ComputeProgram* pProg)
-{
-    if (pProg == nullptr)
-        throw ArgumentError("Can't create a ComputeVars object without a program");
-    return create(std::move(pDevice), pProg->getReflector());
-}
-
-ComputeVars::ComputeVars(std::shared_ptr<Device> pDevice, const ProgramReflection::SharedConstPtr& pReflector)
-    : ProgramVars(pDevice, pReflector)
-{}
-
-void ComputeVars::dispatchCompute(ComputeContext* pContext, uint3 const& threadGroupCount)
-{
-    auto pProgram = std::dynamic_pointer_cast<ComputeProgram>(getReflection()->getProgramVersion()->getProgram());
-    FALCOR_ASSERT(pProgram);
-    pProgram->dispatchCompute(pContext, this, threadGroupCount);
-}
-
-RtProgramVars::RtProgramVars(
-    std::shared_ptr<Device> pDevice,
-    const RtProgram::SharedPtr& pProgram,
-    const RtBindingTable::SharedPtr& pBindingTable
-)
+RtProgramVars::RtProgramVars(ref<Device> pDevice, const ref<Program>& pProgram, const ref<RtBindingTable>& pBindingTable)
     : ProgramVars(pDevice, pProgram->getReflector()), mpShaderTable(pDevice)
 {
-    if (pProgram == nullptr)
-    {
-        throw ArgumentError("RtProgramVars must have a raytracing program attached to it");
-    }
-    if (pBindingTable == nullptr || !pBindingTable->getRayGen().isValid())
-    {
-        throw ArgumentError("RtProgramVars must have a raygen program attached to it");
-    }
+    FALCOR_CHECK(pProgram, "RtProgramVars must have a raytracing program attached to it");
+    FALCOR_CHECK(pBindingTable && pBindingTable->getRayGen().isValid(), "RtProgramVars must have a raygen program attached to it");
 
     init(pBindingTable);
 }
 
-RtProgramVars::SharedPtr RtProgramVars::create(
-    std::shared_ptr<Device> pDevice,
-    const RtProgram::SharedPtr& pProgram,
-    const RtBindingTable::SharedPtr& pBindingTable
-)
+ref<RtProgramVars> RtProgramVars::create(ref<Device> pDevice, const ref<Program>& pProgram, const ref<RtBindingTable>& pBindingTable)
 {
-    return SharedPtr(new RtProgramVars(pDevice, pProgram, pBindingTable));
+    return ref<RtProgramVars>(new RtProgramVars(pDevice, pProgram, pBindingTable));
 }
 
-void RtProgramVars::init(const RtBindingTable::SharedPtr& pBindingTable)
+void RtProgramVars::init(const ref<RtBindingTable>& pBindingTable)
 {
     mRayTypeCount = pBindingTable->getRayTypeCount();
     mGeometryCount = pBindingTable->getGeometryCount();
@@ -127,37 +81,36 @@ void RtProgramVars::init(const RtBindingTable::SharedPtr& pBindingTable)
     // groups that are used by the supplied binding table.
     //
     FALCOR_ASSERT(mpProgramVersion);
-    FALCOR_ASSERT(dynamic_cast<RtProgram*>(mpProgramVersion->getProgram().get()));
-    auto pProgram = static_cast<RtProgram*>(mpProgramVersion->getProgram().get());
+    auto pProgram = dynamic_cast<Program*>(mpProgramVersion->getProgram());
+    FALCOR_ASSERT(pProgram);
     auto pReflector = mpProgramVersion->getReflector();
 
-    auto& rtDesc = pProgram->getRtDesc();
     std::set<int32_t> entryPointGroupIndices;
 
     // Ray generation and miss programs are easy: we just allocate space
     // for one parameter block per entry-point of the given type in the binding table.
     //
-    const auto& info = pBindingTable->getRayGen();
-    FALCOR_ASSERT(info.isValid());
+    const auto& rayGenInfo = pBindingTable->getRayGen();
+    FALCOR_ASSERT(rayGenInfo.isValid());
     mRayGenVars.resize(1);
-    mRayGenVars[0].entryPointGroupIndex = info.groupIndex;
-    entryPointGroupIndices.insert(info.groupIndex);
+    mRayGenVars[0].entryPointGroupIndex = rayGenInfo.groupIndex;
+    entryPointGroupIndices.insert(rayGenInfo.groupIndex);
 
     uint32_t missCount = pBindingTable->getMissCount();
     mMissVars.resize(missCount);
 
     for (uint32_t i = 0; i < missCount; ++i)
     {
-        const auto& info = pBindingTable->getMiss(i);
-        if (!info.isValid())
+        const auto& missInfo = pBindingTable->getMiss(i);
+        if (!missInfo.isValid())
         {
             logWarning("Raytracing binding table has no shader at miss index {}. Is that intentional?", i);
             continue;
         }
 
-        mMissVars[i].entryPointGroupIndex = info.groupIndex;
+        mMissVars[i].entryPointGroupIndex = missInfo.groupIndex;
 
-        entryPointGroupIndices.insert(info.groupIndex);
+        entryPointGroupIndices.insert(missInfo.groupIndex);
     }
 
     // Hit groups are more complicated than ray generation and miss shaders.
@@ -174,13 +127,13 @@ void RtProgramVars::init(const RtBindingTable::SharedPtr& pBindingTable)
     {
         for (uint32_t geometryID = 0; geometryID < mGeometryCount; geometryID++)
         {
-            const auto& info = pBindingTable->getHitGroup(rayType, geometryID);
-            if (!info.isValid())
+            const auto& hitGroupInfo = pBindingTable->getHitGroup(rayType, geometryID);
+            if (!hitGroupInfo.isValid())
                 continue;
 
-            mHitVars[mRayTypeCount * geometryID + rayType].entryPointGroupIndex = info.groupIndex;
+            mHitVars[mRayTypeCount * geometryID + rayType].entryPointGroupIndex = hitGroupInfo.groupIndex;
 
-            entryPointGroupIndices.insert(info.groupIndex);
+            entryPointGroupIndices.insert(hitGroupInfo.groupIndex);
         }
     }
 

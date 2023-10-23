@@ -63,7 +63,7 @@ namespace Falcor
         NanoVDBToBricksConverter(const nanovdb::FloatGrid* grid);
         NanoVDBToBricksConverter(const NanoVDBToBricksConverter& rhs) = delete;
 
-        BrickedGrid convert(Device* pDevice);
+        BrickedGrid convert(ref<Device> pDevice);
 
     private:
         const static uint32_t kBrickSize = 8; // Must be 8, to match both NanoVDB leaf size.
@@ -81,7 +81,7 @@ namespace Falcor
             case 4: return ResourceFormat::BC4Unorm;
             case 8: return ResourceFormat::R8Unorm;
             case 16: return ResourceFormat::R16Unorm;
-            default: throw RuntimeError("Unsupported bitdepth in NanoVDBToBricksConverter");
+            default: FALCOR_THROW("Unsupported bitdepth in NanoVDBToBricksConverter");
             }
         }
 
@@ -283,19 +283,20 @@ namespace Falcor
     }
 
     template <typename TexelType, unsigned int kBitsPerTexel>
-    BrickedGrid NanoVDBToBricksConverter<TexelType, kBitsPerTexel>::convert(Device* pDevice)
+    BrickedGrid NanoVDBToBricksConverter<TexelType, kBitsPerTexel>::convert(ref<Device> pDevice)
     {
         auto t0 = CpuTimer::getCurrentTimePoint();
         auto range = NumericRange<int>(0, mLeafDim[0].z);
         std::for_each(std::execution::par, range.begin(), range.end(), [&](int z) { convertSlice(z); });
         for (int mip = 1; mip < 4; ++mip) computeMip(mip);
-        double dt = CpuTimer::calcDuration(t0, CpuTimer::getCurrentTimePoint());
-        logInfo("converted in {}ms: mNonEmptyCount {} vs max {}", dt, mNonEmptyCount, getAtlasMaxBrick());
 
         BrickedGrid bricks;
-        bricks.range = Texture::create3D(pDevice, mLeafDim[0].x, mLeafDim[0].y, mLeafDim[0].z, ResourceFormat::RG16Float, 4, mRangeData.data(), ResourceBindFlags::ShaderResource, false);
-        bricks.indirection = Texture::create3D(pDevice, mLeafDim[0].x, mLeafDim[0].y, mLeafDim[0].z, ResourceFormat::RGBA8Uint, 1, mPtrData.data(), ResourceBindFlags::ShaderResource, false);
-        bricks.atlas = Texture::create3D(pDevice, getAtlasSizePixels().x, getAtlasSizePixels().y, getAtlasSizePixels().z, getAtlasFormat(), 1, mAtlasData.data(), ResourceBindFlags::ShaderResource, false);
+        bricks.range = pDevice->createTexture3D(mLeafDim[0].x, mLeafDim[0].y, mLeafDim[0].z, ResourceFormat::RG16Float, 4, mRangeData.data(), ResourceBindFlags::ShaderResource);
+        bricks.indirection = pDevice->createTexture3D(mLeafDim[0].x, mLeafDim[0].y, mLeafDim[0].z, ResourceFormat::RGBA8Uint, 1, mPtrData.data(), ResourceBindFlags::ShaderResource);
+        bricks.atlas = pDevice->createTexture3D(getAtlasSizePixels().x, getAtlasSizePixels().y, getAtlasSizePixels().z, getAtlasFormat(), 1, mAtlasData.data(), ResourceBindFlags::ShaderResource);
+
+        double dt = CpuTimer::calcDuration(t0, CpuTimer::getCurrentTimePoint());
+        logDebug("Converted '{}' in {:.4}ms: mNonEmptyCount {} vs max {}", mpFloatGrid->gridName(), dt, mNonEmptyCount.load(), getAtlasMaxBrick());
         return bricks;
     }
 }

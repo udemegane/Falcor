@@ -38,8 +38,6 @@ class DLSSPass : public RenderPass
 public:
     FALCOR_PLUGIN_CLASS(DLSSPass, "DLSSPass", "DL antialiasing/upscaling.");
 
-    using SharedPtr = std::shared_ptr<DLSSPass>;
-
     enum class Profile : uint32_t
     {
         MaxPerf,
@@ -47,23 +45,40 @@ public:
         MaxQuality,
     };
 
+    FALCOR_ENUM_INFO(
+        Profile,
+        {
+            {Profile::MaxPerf, "MaxPerf"},
+            {Profile::Balanced, "Balanced"},
+            {Profile::MaxQuality, "MaxQuality"},
+        }
+    );
+
     enum class MotionVectorScale : uint32_t
     {
         Absolute, ///< Motion vectors are provided in absolute screen space length (pixels).
         Relative, ///< Motion vectors are provided in relative screen space length (pixels divided by screen width/height).
     };
 
-    static SharedPtr create(std::shared_ptr<Device> pDevice, const Dictionary& dict);
+    FALCOR_ENUM_INFO(
+        MotionVectorScale,
+        {
+            {MotionVectorScale::Absolute, "Absolute"},
+            {MotionVectorScale::Relative, "Relative"},
+        }
+    );
 
-    virtual Dictionary getScriptingDictionary() override;
+    static ref<DLSSPass> create(ref<Device> pDevice, const Properties& props) { return make_ref<DLSSPass>(pDevice, props); }
+
+    DLSSPass(ref<Device> pDevice, const Properties& props);
+
+    virtual Properties getProperties() const override;
     virtual RenderPassReflection reflect(const CompileData& compileData) override;
-    virtual void setScene(RenderContext* pRenderContext, const std::shared_ptr<Scene>& pScene) override;
+    virtual void setScene(RenderContext* pRenderContext, const ref<Scene>& pScene) override;
     virtual void execute(RenderContext* pRenderContext, const RenderData& renderData) override;
     virtual void renderUI(Gui::Widgets& widget) override;
 
 private:
-    DLSSPass(std::shared_ptr<Device> pDevice, const Dictionary& dict);
-
     void initializeDLSS(RenderContext* pRenderContext);
     void executeInternal(RenderContext* pRenderContext, const RenderData& renderData);
 
@@ -82,9 +97,12 @@ private:
     uint2 mPassOutputSize = {}; ///< Pass output size in pixels. If different from DLSS output size, the image gets bilinearly resampled.
     RenderPassHelpers::IOSize mOutputSizeSelection = RenderPassHelpers::IOSize::Default; ///< Selected output size.
 
-    Scene::SharedPtr mpScene;
-    Texture::SharedPtr mpOutput;   ///< Internal output buffer. This is used if format/size conversion upon output is needed.
-    Texture::SharedPtr mpExposure; ///< Texture of size 1x1 holding exposure value.
+    ref<Scene> mpScene;
+    ref<Texture> mpOutput;   ///< Internal output buffer. This is used if format/size conversion upon output is needed.
+    ref<Texture> mpExposure; ///< Texture of size 1x1 holding exposure value.
 
     std::unique_ptr<NGXWrapper> mpNGXWrapper;
 };
+
+FALCOR_ENUM_REGISTER(DLSSPass::Profile);
+FALCOR_ENUM_REGISTER(DLSSPass::MotionVectorScale);

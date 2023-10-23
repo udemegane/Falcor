@@ -30,6 +30,7 @@
 #include "ProgramVersion.h"
 #include "Core/API/Device.h"
 #include "Utils/StringUtils.h"
+#include "Utils/Scripting/ScriptBindings.h"
 
 #include <slang.h>
 
@@ -44,11 +45,9 @@ namespace
 const char* kRootDescriptorAttribute = "root";
 }
 
-TypedShaderVarOffset::TypedShaderVarOffset(const ReflectionType* pType, ShaderVarOffset offset)
-    : ShaderVarOffset(offset), mpType(pType->shared_from_this())
-{}
+TypedShaderVarOffset::TypedShaderVarOffset(const ReflectionType* pType, ShaderVarOffset offset) : ShaderVarOffset(offset), mpType(pType) {}
 
-TypedShaderVarOffset TypedShaderVarOffset::operator[](const std::string& name) const
+TypedShaderVarOffset TypedShaderVarOffset::operator[](std::string_view name) const
 {
     if (!isValid())
         return *this;
@@ -59,17 +58,11 @@ TypedShaderVarOffset TypedShaderVarOffset::operator[](const std::string& name) c
     {
         if (auto pMember = pStructType->findMember(name))
         {
-            return TypedShaderVarOffset(pMember->getType().get(), (*this) + pMember->getBindLocation());
+            return TypedShaderVarOffset(pMember->getType(), (*this) + pMember->getBindLocation());
         }
     }
 
-    reportError(fmt::format("No member named '{}' found.", name));
-    return TypedShaderVarOffset();
-}
-
-TypedShaderVarOffset TypedShaderVarOffset::operator[](const char* name) const
-{
-    return (*this)[std::string(name)];
+    FALCOR_THROW("No member named '{}' found.", name);
 }
 
 TypedShaderVarOffset TypedShaderVarOffset::operator[](size_t index) const
@@ -82,7 +75,7 @@ TypedShaderVarOffset ReflectionType::getZeroOffset() const
     return TypedShaderVarOffset(this, ShaderVarOffset::kZero);
 }
 
-TypedShaderVarOffset ReflectionType::getMemberOffset(const std::string& name) const
+TypedShaderVarOffset ReflectionType::getMemberOffset(std::string_view name) const
 {
     return getZeroOffset()[name];
 }
@@ -612,7 +605,7 @@ static ReflectionResourceType::StructuredType getStructuredBufferType(TypeReflec
     }
 };
 
-ReflectionVar::SharedPtr reflectVariable(
+ref<ReflectionVar> reflectVariable(
     VariableLayoutReflection* pSlangLayout,
     ShaderVarOffset::RangeIndex rangeIndex,
     ParameterBlockReflection* pBlock,
@@ -620,7 +613,7 @@ ReflectionVar::SharedPtr reflectVariable(
     ProgramVersion const* pProgramVersion
 );
 
-ReflectionType::SharedPtr reflectType(
+ref<ReflectionType> reflectType(
     TypeLayoutReflection* pSlangType,
     ParameterBlockReflection* pBlock,
     ReflectionPath* pPath,
@@ -677,7 +670,7 @@ static size_t getRegisterIndexFromPath(const ReflectionPathLink* pPath, SlangPar
             offset += (uint32_t)pp->pVar->getOffset(category);
             continue;
         }
-        throw RuntimeError("Invalid reflection path");
+        FALCOR_THROW("Invalid reflection path");
     }
     return offset;
 }
@@ -708,7 +701,7 @@ static uint32_t getRegisterSpaceFromPath(const ReflectionPathLink* pPath, SlangP
             continue;
         }
 
-        throw RuntimeError("Invalid reflection path");
+        FALCOR_THROW("Invalid reflection path");
     }
     return offset;
 }
@@ -753,7 +746,7 @@ static void extractDefaultConstantBufferBinding(
     }
 }
 
-ReflectionType::SharedPtr reflectResourceType(
+ref<ReflectionType> reflectResourceType(
     TypeLayoutReflection* pSlangType,
     ParameterBlockReflection* pBlock,
     ReflectionPath* pPath,
@@ -783,7 +776,7 @@ ReflectionType::SharedPtr reflectResourceType(
         if (type != ReflectionResourceType::Type::RawBuffer && type != ReflectionResourceType::Type::StructuredBuffer &&
             type != ReflectionResourceType::Type::AccelerationStructure)
         {
-            throw RuntimeError(
+            FALCOR_THROW(
                 "Resource '{}' cannot be bound as root descriptor. Only raw buffers, structured buffers, and acceleration structures are "
                 "supported.",
                 name
@@ -791,7 +784,7 @@ ReflectionType::SharedPtr reflectResourceType(
         }
         if (shaderAccess != ReflectionResourceType::ShaderAccess::Read && shaderAccess != ReflectionResourceType::ShaderAccess::ReadWrite)
         {
-            throw RuntimeError("Buffer '{}' cannot be bound as root descriptor. Only SRV/UAVs are supported.", name);
+            FALCOR_THROW("Buffer '{}' cannot be bound as root descriptor. Only SRV/UAVs are supported.", name);
         }
         FALCOR_ASSERT(
             type != ReflectionResourceType::Type::AccelerationStructure || shaderAccess == ReflectionResourceType::ShaderAccess::Read
@@ -806,7 +799,7 @@ ReflectionType::SharedPtr reflectResourceType(
             if (structuredType == ReflectionResourceType::StructuredType::Append ||
                 structuredType == ReflectionResourceType::StructuredType::Consume)
             {
-                throw RuntimeError(
+                FALCOR_THROW(
                     "StructuredBuffer '{}' cannot be bound as root descriptor. Only regular structured buffers are supported, not "
                     "append/consume buffers.",
                     name
@@ -818,7 +811,7 @@ ReflectionType::SharedPtr reflectResourceType(
         ); // We shouldn't get here otherwise
     }
 
-    ReflectionResourceType::SharedPtr pType = ReflectionResourceType::create(type, dims, structuredType, retType, shaderAccess, pSlangType);
+    ref<ReflectionResourceType> pType = ReflectionResourceType::create(type, dims, structuredType, retType, shaderAccess, pSlangType);
 
     ParameterCategory category = getParameterCategory(pSlangType);
     ParameterBlockReflection::ResourceRangeBindingInfo bindingInfo;
@@ -888,7 +881,7 @@ ReflectionType::SharedPtr reflectResourceType(
     return pType;
 }
 
-ReflectionType::SharedPtr reflectStructType(
+ref<ReflectionType> reflectStructType(
     TypeLayoutReflection* pSlangType,
     ParameterBlockReflection* pBlock,
     ReflectionPath* pPath,
@@ -902,8 +895,7 @@ ReflectionType::SharedPtr reflectStructType(
     auto pSlangName = pSlangType->getName();
     auto name = pSlangName ? std::string(pSlangName) : std::string();
 
-    ReflectionStructType::SharedPtr pType =
-        ReflectionStructType::create(pSlangType->getSize(SLANG_PARAMETER_CATEGORY_UNIFORM), name, pSlangType);
+    ref<ReflectionStructType> pType = ReflectionStructType::create(pSlangType->getSize(SLANG_PARAMETER_CATEGORY_UNIFORM), name, pSlangType);
 
     ReflectionStructType::BuildState buildState;
 
@@ -912,7 +904,7 @@ ReflectionType::SharedPtr reflectStructType(
         auto pSlangField = pSlangType->getFieldByIndex(i);
         ExtendedReflectionPath fieldPath(pPath, pSlangField);
 
-        ReflectionVar::SharedPtr pVar = reflectVariable(pSlangField, pType->getResourceRangeCount(), pBlock, &fieldPath, pProgramVersion);
+        ref<ReflectionVar> pVar = reflectVariable(pSlangField, pType->getResourceRangeCount(), pBlock, &fieldPath, pProgramVersion);
         if (pVar)
             pType->addMember(pVar, buildState);
     }
@@ -924,7 +916,7 @@ static ReflectionType::ByteSize getByteSize(TypeLayoutReflection* pSlangType)
     return pSlangType->getSize(SLANG_PARAMETER_CATEGORY_UNIFORM);
 }
 
-ReflectionType::SharedPtr reflectArrayType(
+ref<ReflectionType> reflectArrayType(
     TypeLayoutReflection* pSlangType,
     ParameterBlockReflection* pBlock,
     ReflectionPath* pPath,
@@ -934,21 +926,21 @@ ReflectionType::SharedPtr reflectArrayType(
     uint32_t elementCount = (uint32_t)pSlangType->getElementCount();
     uint32_t elementByteStride = (uint32_t)pSlangType->getElementStride(SLANG_PARAMETER_CATEGORY_UNIFORM);
 
-    ReflectionType::SharedPtr pElementType = reflectType(pSlangType->getElementTypeLayout(), pBlock, pPath, pProgramVersion);
-    ReflectionArrayType::SharedPtr pArrayType =
+    ref<ReflectionType> pElementType = reflectType(pSlangType->getElementTypeLayout(), pBlock, pPath, pProgramVersion);
+    ref<ReflectionArrayType> pArrayType =
         ReflectionArrayType::create(elementCount, elementByteStride, pElementType, getByteSize(pSlangType), pSlangType);
     return pArrayType;
 }
 
-ReflectionType::SharedPtr reflectBasicType(TypeLayoutReflection* pSlangType)
+ref<ReflectionType> reflectBasicType(TypeLayoutReflection* pSlangType)
 {
     const bool isRowMajor = pSlangType->getMatrixLayoutMode() == SLANG_MATRIX_LAYOUT_ROW_MAJOR;
     ReflectionBasicType::Type type = getVariableType(pSlangType->getScalarType(), pSlangType->getRowCount(), pSlangType->getColumnCount());
-    ReflectionType::SharedPtr pType = ReflectionBasicType::create(type, isRowMajor, pSlangType->getSize(), pSlangType);
+    ref<ReflectionType> pType = ReflectionBasicType::create(type, isRowMajor, pSlangType->getSize(), pSlangType);
     return pType;
 }
 
-ReflectionType::SharedPtr reflectInterfaceType(
+ref<ReflectionType> reflectInterfaceType(
     TypeLayoutReflection* pSlangType,
     ParameterBlockReflection* pBlock,
     ReflectionPath* pPath,
@@ -995,7 +987,7 @@ ReflectionType::SharedPtr reflectInterfaceType(
     return pType;
 }
 
-ReflectionType::SharedPtr reflectSpecializedType(
+ref<ReflectionType> reflectSpecializedType(
     TypeLayoutReflection* pSlangType,
     ParameterBlockReflection* pBlock,
     ReflectionPath* pPath,
@@ -1017,7 +1009,7 @@ ReflectionType::SharedPtr reflectSpecializedType(
     return reflectType(pSlangBaseType, pBlock, &path, pProgramVersion);
 }
 
-ReflectionType::SharedPtr reflectType(
+ref<ReflectionType> reflectType(
     TypeLayoutReflection* pSlangType,
     ParameterBlockReflection* pBlock,
     ReflectionPath* pPath,
@@ -1051,7 +1043,7 @@ ReflectionType::SharedPtr reflectType(
         return nullptr;
     case TypeReflection::Kind::GenericTypeParameter:
         // TODO: How to handle this type? Let it generate an error for now.
-        throw ArgumentError("Unexpected Slang type");
+        FALCOR_THROW("Unexpected Slang type");
     default:
         FALCOR_UNREACHABLE();
     }
@@ -1080,7 +1072,7 @@ static ParameterCategory getParameterCategory(VariableLayoutReflection* pVarLayo
     return getParameterCategory(pVarLayout->getTypeLayout());
 }
 
-ReflectionVar::SharedPtr reflectVariable(
+ref<ReflectionVar> reflectVariable(
     VariableLayoutReflection* pSlangLayout,
     ShaderVarOffset::RangeIndex rangeIndex,
     ParameterBlockReflection* pBlock,
@@ -1091,16 +1083,16 @@ ReflectionVar::SharedPtr reflectVariable(
     FALCOR_ASSERT(pPath);
     std::string name(pSlangLayout->getName());
 
-    ReflectionType::SharedPtr pType = reflectType(pSlangLayout->getTypeLayout(), pBlock, pPath, pProgramVersion);
+    ref<ReflectionType> pType = reflectType(pSlangLayout->getTypeLayout(), pBlock, pPath, pProgramVersion);
     auto byteOffset = (ShaderVarOffset::ByteOffset)pSlangLayout->getOffset(SLANG_PARAMETER_CATEGORY_UNIFORM);
 
-    ReflectionVar::SharedPtr pVar =
+    ref<ReflectionVar> pVar =
         ReflectionVar::create(name, pType, ShaderVarOffset(UniformShaderVarOffset(byteOffset), ResourceShaderVarOffset(rangeIndex, 0)));
 
     return pVar;
 }
 
-ReflectionVar::SharedPtr reflectTopLevelVariable(
+ref<ReflectionVar> reflectTopLevelVariable(
     VariableLayoutReflection* pSlangLayout,
     ShaderVarOffset::RangeIndex rangeIndex,
     ParameterBlockReflection* pBlock,
@@ -1209,24 +1201,14 @@ static void reflectShaderIO(
     }
 }
 
-ProgramReflection::SharedPtr ProgramReflection::create(
+ref<const ProgramReflection> ProgramReflection::create(
     ProgramVersion const* pProgramVersion,
     slang::ShaderReflection* pSlangReflector,
-    std::vector<slang::EntryPointLayout*> const& pSlangEntryPointReflectors,
+    const std::vector<slang::EntryPointLayout*>& pSlangEntryPointReflectors,
     std::string& log
 )
 {
-    return SharedPtr(new ProgramReflection(pProgramVersion, pSlangReflector, pSlangEntryPointReflectors, log));
-}
-
-ProgramReflection::SharedPtr ProgramReflection::createEmpty()
-{
-    return SharedPtr(new ProgramReflection(nullptr));
-}
-
-std::shared_ptr<const ProgramVersion> ParameterBlockReflection::getProgramVersion() const
-{
-    return mpProgramVersion->shared_from_this();
+    return ref<const ProgramReflection>(new ProgramReflection(pProgramVersion, pSlangReflector, pSlangEntryPointReflectors, log));
 }
 
 void ProgramReflection::finalize()
@@ -1236,9 +1218,9 @@ void ProgramReflection::finalize()
 
 ProgramReflection::ProgramReflection(ProgramVersion const* pProgramVersion) : mpProgramVersion(pProgramVersion)
 {
-    ReflectionStructType::SharedPtr pGlobalStruct = ReflectionStructType::create(0, "", nullptr);
+    ref<ReflectionStructType> pGlobalStruct = ReflectionStructType::create(0, "", nullptr);
 
-    ParameterBlockReflection::SharedPtr pDefaultBlock = ParameterBlockReflection::createEmpty(pProgramVersion);
+    ref<ParameterBlockReflection> pDefaultBlock = ParameterBlockReflection::createEmpty(pProgramVersion);
     pDefaultBlock->setElementType(pGlobalStruct);
     setDefaultParameterBlock(pDefaultBlock);
 }
@@ -1316,10 +1298,10 @@ static uint32_t getUniformParameterCount(slang::EntryPointReflection* pSlangEntr
     return uniformParamCount;
 }
 
-EntryPointGroupReflection::SharedPtr EntryPointGroupReflection::create(
+ref<EntryPointGroupReflection> EntryPointGroupReflection::create(
     ProgramVersion const* pProgramVersion,
     uint32_t groupIndex,
-    std::vector<slang::EntryPointLayout*> const& pSlangEntryPointReflectors
+    const std::vector<slang::EntryPointLayout*>& pSlangEntryPointReflectors
 )
 {
     // We are going to expect/require that all the entry points have the
@@ -1344,7 +1326,7 @@ EntryPointGroupReflection::SharedPtr EntryPointGroupReflection::create(
         }
     }
 
-    auto pGroup = SharedPtr(new EntryPointGroupReflection(pProgramVersion));
+    auto pGroup = ref<EntryPointGroupReflection>(new EntryPointGroupReflection(pProgramVersion));
 
     // The layout for an entry point either represents a Slang `struct` type
     // for the entry-point parameters, or it represents a Slang `ConstantBuffer<X>`
@@ -1485,7 +1467,7 @@ static ShaderType getShaderTypeFromSlangStage(SlangStage stage)
 ProgramReflection::ProgramReflection(
     ProgramVersion const* pProgramVersion,
     slang::ShaderReflection* pSlangReflector,
-    std::vector<slang::EntryPointLayout*> const& pSlangEntryPointReflectors,
+    const std::vector<slang::EntryPointLayout*>& pSlangEntryPointReflectors,
     std::string& log
 )
     : mpProgramVersion(pProgramVersion), mpSlangReflector(pSlangReflector)
@@ -1523,8 +1505,8 @@ ProgramReflection::ProgramReflection(
     //
     size_t slangGlobalParamsSize = pSlangGlobalParamsTypeLayout->getSize(SlangParameterCategory(slang::ParameterCategory::Uniform));
 
-    ReflectionStructType::SharedPtr pGlobalStruct = ReflectionStructType::create(slangGlobalParamsSize, "", nullptr);
-    ParameterBlockReflection::SharedPtr pDefaultBlock = ParameterBlockReflection::createEmpty(pProgramVersion);
+    ref<ReflectionStructType> pGlobalStruct = ReflectionStructType::create(slangGlobalParamsSize, "", nullptr);
+    ref<ParameterBlockReflection> pDefaultBlock = ParameterBlockReflection::createEmpty(pProgramVersion);
     pDefaultBlock->setElementType(pGlobalStruct);
 
     ReflectionStructType::BuildState buildState;
@@ -1532,7 +1514,7 @@ ProgramReflection::ProgramReflection(
     {
         VariableLayoutReflection* pSlangLayout = pSlangReflector->getParameterByIndex(i);
 
-        ReflectionVar::SharedPtr pVar =
+        ref<ReflectionVar> pVar =
             reflectTopLevelVariable(pSlangLayout, pGlobalStruct->getResourceRangeCount(), pDefaultBlock.get(), pProgramVersion);
         if (pVar)
             pGlobalStruct->addMember(pVar, buildState);
@@ -1547,7 +1529,7 @@ ProgramReflection::ProgramReflection(
 
     for (uint32_t gg = 0; gg < entryPointGroupCount; ++gg)
     {
-        EntryPointGroupReflection::SharedPtr pEntryPointGroup =
+        ref<EntryPointGroupReflection> pEntryPointGroup =
             EntryPointGroupReflection::create(pProgramVersion, gg, pSlangEntryPointReflectors);
         mEntryPointGroups.push_back(pEntryPointGroup);
     }
@@ -1589,13 +1571,13 @@ ProgramReflection::ProgramReflection(
     }
 }
 
-void ProgramReflection::setDefaultParameterBlock(const ParameterBlockReflection::SharedPtr& pBlock)
+void ProgramReflection::setDefaultParameterBlock(const ref<ParameterBlockReflection>& pBlock)
 {
     mpDefaultBlock = pBlock;
 }
 
 int32_t ReflectionStructType::addMemberIgnoringNameConflicts(
-    const std::shared_ptr<const ReflectionVar>& pVar,
+    const ref<const ReflectionVar>& pVar,
     ReflectionStructType::BuildState& ioBuildState
 )
 {
@@ -1652,16 +1634,17 @@ int32_t ReflectionStructType::addMemberIgnoringNameConflicts(
     return memberIndex;
 }
 
-int32_t ReflectionStructType::addMember(const std::shared_ptr<const ReflectionVar>& pVar, ReflectionStructType::BuildState& ioBuildState)
+int32_t ReflectionStructType::addMember(const ref<const ReflectionVar>& pVar, ReflectionStructType::BuildState& ioBuildState)
 {
     if (mNameToIndex.find(pVar->getName()) != mNameToIndex.end())
     {
         int32_t index = mNameToIndex[pVar->getName()];
         if (*pVar != *mMembers[index])
         {
-            throw RuntimeError(
+            FALCOR_THROW(
                 "Mismatch in variable declarations between different shader stages. Variable name is '{}', struct name is '{}'.",
-                pVar->getName(), mName
+                pVar->getName(),
+                mName
             );
         }
         return -1;
@@ -1671,16 +1654,16 @@ int32_t ReflectionStructType::addMember(const std::shared_ptr<const ReflectionVa
     return memberIndex;
 }
 
-ReflectionVar::SharedPtr ReflectionVar::create(
+ref<ReflectionVar> ReflectionVar::create(
     const std::string& name,
-    const ReflectionType::SharedConstPtr& pType,
-    ShaderVarOffset const& bindLocation
+    const ref<const ReflectionType>& pType,
+    const ShaderVarOffset& bindLocation
 )
 {
-    return SharedPtr(new ReflectionVar(name, pType, bindLocation));
+    return ref<ReflectionVar>(new ReflectionVar(name, pType, bindLocation));
 }
 
-ReflectionVar::ReflectionVar(const std::string& name, const ReflectionType::SharedConstPtr& pType, ShaderVarOffset const& bindLocation)
+ReflectionVar::ReflectionVar(const std::string& name, const ref<const ReflectionType>& pType, const ShaderVarOffset& bindLocation)
     : mName(name), mpType(pType), mBindLocation(bindLocation)
 {}
 
@@ -1688,20 +1671,20 @@ ReflectionVar::ReflectionVar(const std::string& name, const ReflectionType::Shar
 
 ParameterBlockReflection::ParameterBlockReflection(ProgramVersion const* pProgramVersion) : mpProgramVersion(pProgramVersion) {}
 
-ParameterBlockReflection::SharedPtr ParameterBlockReflection::createEmpty(ProgramVersion const* pProgramVersion)
+ref<ParameterBlockReflection> ParameterBlockReflection::createEmpty(ProgramVersion const* pProgramVersion)
 {
-    return SharedPtr(new ParameterBlockReflection(pProgramVersion));
+    return ref<ParameterBlockReflection>(new ParameterBlockReflection(pProgramVersion));
 }
 
-void ParameterBlockReflection::setElementType(ReflectionType::SharedConstPtr const& pElementType)
+void ParameterBlockReflection::setElementType(const ref<const ReflectionType>& pElementType)
 {
     FALCOR_ASSERT(!mpElementType);
     mpElementType = pElementType;
 }
 
-ParameterBlockReflection::SharedPtr ParameterBlockReflection::create(
+ref<ParameterBlockReflection> ParameterBlockReflection::create(
     ProgramVersion const* pProgramVersion,
-    ReflectionType::SharedConstPtr const& pElementType
+    const ref<const ReflectionType>& pElementType
 )
 {
     auto pResult = createEmpty(pProgramVersion);
@@ -1715,7 +1698,7 @@ ParameterBlockReflection::SharedPtr ParameterBlockReflection::create(
     auto rangeCount = pElementType->getResourceRangeCount();
     for (uint32_t rangeIndex = 0; rangeIndex < rangeCount; ++rangeIndex)
     {
-        auto const& rangeInfo = pElementType->getResourceRange(rangeIndex);
+        const auto& rangeInfo = pElementType->getResourceRange(rangeIndex);
 
         ResourceRangeBindingInfo bindingInfo;
 
@@ -1775,7 +1758,7 @@ ParameterBlockReflection::SharedPtr ParameterBlockReflection::create(
     return pResult;
 }
 
-ParameterBlockReflection::SharedPtr ParameterBlockReflection::create(
+ref<ParameterBlockReflection> ParameterBlockReflection::create(
     ProgramVersion const* pProgramVersion,
     slang::TypeLayoutReflection* pSlangElementType
 )
@@ -1828,12 +1811,12 @@ static ShaderResourceType getShaderResourceType(const ReflectionResourceType* pT
     }
 }
 
-const ReflectionVar::SharedConstPtr ParameterBlockReflection::getResource(const std::string& name) const
+const ref<const ReflectionVar> ParameterBlockReflection::getResource(std::string_view name) const
 {
     return getElementType()->findMember(name);
 }
 
-void ParameterBlockReflection::addResourceRange(ResourceRangeBindingInfo const& bindingInfo)
+void ParameterBlockReflection::addResourceRange(const ResourceRangeBindingInfo& bindingInfo)
 {
     mResourceRanges.push_back(bindingInfo);
 }
@@ -1919,8 +1902,8 @@ struct ParameterBlockReflectionFinalizer
                     continue;
                 }
 
-                auto subRange = subSet.layout.getRange(r);
-                setInfo.layout.addRange(subRange.type, subRange.baseRegIndex, subRange.descCount, subRange.regSpace);
+                auto range = subSet.layout.getRange(r);
+                setInfo.layout.addRange(range.type, range.baseRegIndex, range.descCount, range.regSpace);
             }
         }
     }
@@ -1970,9 +1953,10 @@ struct ParameterBlockReflectionFinalizer
             case ParameterBlockReflection::ResourceRangeBindingInfo::Flavor::RootDescriptor:
                 if (range.count > 1)
                 {
-                    throw RuntimeError(
+                    FALCOR_THROW(
                         "Root descriptor at register index {} in space {} is illegal. Root descriptors cannot be arrays.",
-                        rangeBindingInfo.regIndex, rangeBindingInfo.regSpace
+                        rangeBindingInfo.regIndex,
+                        rangeBindingInfo.regSpace
                     );
                 }
                 pReflector->mRootDescriptorRangeIndices.push_back(rangeIndex);
@@ -2034,12 +2018,12 @@ bool ParameterBlockReflection::hasDefaultConstantBuffer() const
     return getElementType()->getByteSize() != 0;
 }
 
-void ParameterBlockReflection::setDefaultConstantBufferBindingInfo(DefaultConstantBufferBindingInfo const& info)
+void ParameterBlockReflection::setDefaultConstantBufferBindingInfo(const DefaultConstantBufferBindingInfo& info)
 {
     mDefaultConstantBufferBindingInfo = info;
 }
 
-ParameterBlockReflection::DefaultConstantBufferBindingInfo const& ParameterBlockReflection::getDefaultConstantBufferBindingInfo() const
+const ParameterBlockReflection::DefaultConstantBufferBindingInfo& ParameterBlockReflection::getDefaultConstantBufferBindingInfo() const
 {
     return mDefaultConstantBufferBindingInfo;
 }
@@ -2056,18 +2040,12 @@ void ParameterBlockReflection::finalize()
 #endif
 }
 
-std::shared_ptr<const ProgramVersion> ProgramReflection::getProgramVersion() const
-{
-    return mpProgramVersion ? mpProgramVersion->shared_from_this() : ProgramVersion::SharedPtr();
-}
-
-ParameterBlockReflection::SharedConstPtr ProgramReflection::getParameterBlock(const std::string& name) const
+ref<const ParameterBlockReflection> ProgramReflection::getParameterBlock(std::string_view name) const
 {
     if (name == "")
         return mpDefaultBlock;
 
-    return mpDefaultBlock->getElementType()->findMember(name)->getType()->asResourceType()->getParameterBlockReflector()->shared_from_this(
-    );
+    return mpDefaultBlock->getElementType()->findMember(name)->getType()->asResourceType()->getParameterBlockReflector();
 }
 
 TypedShaderVarOffset ReflectionType::findMemberByOffset(size_t offset) const
@@ -2093,7 +2071,7 @@ TypedShaderVarOffset ReflectionStructType::findMemberByOffset(size_t offset) con
         {
             if (offset < memberUniformOffset + memberByteSize)
             {
-                return TypedShaderVarOffset(pMemberType.get(), memberOffset);
+                return TypedShaderVarOffset(pMemberType, memberOffset);
             }
         }
     }
@@ -2101,7 +2079,7 @@ TypedShaderVarOffset ReflectionStructType::findMemberByOffset(size_t offset) con
     return TypedShaderVarOffset::kInvalid;
 }
 
-ReflectionVar::SharedConstPtr ReflectionType::findMember(const std::string& name) const
+ref<const ReflectionVar> ReflectionType::findMember(std::string_view name) const
 {
     if (auto pStructType = asStructType())
     {
@@ -2115,7 +2093,7 @@ ReflectionVar::SharedConstPtr ReflectionType::findMember(const std::string& name
     return nullptr;
 }
 
-int32_t ReflectionStructType::getMemberIndex(const std::string& name) const
+int32_t ReflectionStructType::getMemberIndex(std::string_view name) const
 {
     auto it = mNameToIndex.find(name);
     if (it == mNameToIndex.end())
@@ -2123,9 +2101,9 @@ int32_t ReflectionStructType::getMemberIndex(const std::string& name) const
     return it->second;
 }
 
-const ReflectionVar::SharedConstPtr& ReflectionStructType::getMember(const std::string& name) const
+const ref<const ReflectionVar>& ReflectionStructType::getMember(std::string_view name) const
 {
-    static const ReflectionVar::SharedConstPtr pNull;
+    static const ref<const ReflectionVar> pNull;
     auto index = getMemberIndex(name);
     return (index == kInvalidMemberIndex) ? pNull : getMember(index);
 }
@@ -2170,7 +2148,7 @@ const ReflectionType* ReflectionType::unwrapArray() const
     const ReflectionType* pType = this;
     while (auto pArrayType = pType->asArrayType())
     {
-        pType = pArrayType->getElementType().get();
+        pType = pArrayType->getElementType();
     }
     return pType;
 }
@@ -2183,26 +2161,26 @@ uint32_t ReflectionType::getTotalArrayElementCount() const
     while (auto pArrayType = pType->asArrayType())
     {
         result *= pArrayType->getElementCount();
-        pType = pArrayType->getElementType().get();
+        pType = pArrayType->getElementType();
     }
     return result;
 }
 
-ReflectionArrayType::SharedPtr ReflectionArrayType::create(
+ref<ReflectionArrayType> ReflectionArrayType::create(
     uint32_t arraySize,
     uint32_t arrayStride,
-    const ReflectionType::SharedConstPtr& pType,
+    const ref<const ReflectionType>& pType,
     ByteSize byteSize,
     slang::TypeLayoutReflection* pSlangTypeLayout
 )
 {
-    return SharedPtr(new ReflectionArrayType(arraySize, arrayStride, pType, byteSize, pSlangTypeLayout));
+    return ref<ReflectionArrayType>(new ReflectionArrayType(arraySize, arrayStride, pType, byteSize, pSlangTypeLayout));
 }
 
 ReflectionArrayType::ReflectionArrayType(
     uint32_t elementCount,
     uint32_t elementByteStride,
-    const ReflectionType::SharedConstPtr& pElementType,
+    const ref<const ReflectionType>& pElementType,
     ByteSize byteSize,
     slang::TypeLayoutReflection* pSlangTypeLayout
 )
@@ -2221,7 +2199,7 @@ ReflectionArrayType::ReflectionArrayType(
     }
 }
 
-ReflectionResourceType::SharedPtr ReflectionResourceType::create(
+ref<ReflectionResourceType> ReflectionResourceType::create(
     Type type,
     Dimensions dims,
     StructuredType structuredType,
@@ -2230,7 +2208,7 @@ ReflectionResourceType::SharedPtr ReflectionResourceType::create(
     slang::TypeLayoutReflection* pSlangTypeLayout
 )
 {
-    return SharedPtr(new ReflectionResourceType(type, dims, structuredType, retType, shaderAccess, pSlangTypeLayout));
+    return ref<ReflectionResourceType>(new ReflectionResourceType(type, dims, structuredType, retType, shaderAccess, pSlangTypeLayout));
 }
 
 ReflectionResourceType::ReflectionResourceType(
@@ -2256,44 +2234,35 @@ ReflectionResourceType::ReflectionResourceType(
     mResourceRanges.push_back(range);
 }
 
-void ReflectionResourceType::setStructType(const ReflectionType::SharedConstPtr& pType)
+void ReflectionResourceType::setStructType(const ref<const ReflectionType>& pType)
 {
     mpStructType = pType;
 }
 
-ReflectionBasicType::SharedPtr ReflectionBasicType::create(
-    Type type,
-    bool isRowMajor,
-    size_t size,
-    slang::TypeLayoutReflection* pSlangTypeLayout
-)
+ref<ReflectionBasicType> ReflectionBasicType::create(Type type, bool isRowMajor, size_t size, slang::TypeLayoutReflection* pSlangTypeLayout)
 {
-    return SharedPtr(new ReflectionBasicType(type, isRowMajor, size, pSlangTypeLayout));
+    return ref<ReflectionBasicType>(new ReflectionBasicType(type, isRowMajor, size, pSlangTypeLayout));
 }
 
 ReflectionBasicType::ReflectionBasicType(Type type, bool isRowMajor, size_t size, slang::TypeLayoutReflection* pSlangTypeLayout)
     : ReflectionType(ReflectionType::Kind::Basic, size, pSlangTypeLayout), mType(type), mIsRowMajor(isRowMajor)
 {}
 
-ReflectionStructType::SharedPtr ReflectionStructType::create(
-    size_t size,
-    const std::string& name,
-    slang::TypeLayoutReflection* pSlangTypeLayout
-)
+ref<ReflectionStructType> ReflectionStructType::create(size_t size, const std::string& name, slang::TypeLayoutReflection* pSlangTypeLayout)
 {
-    return SharedPtr(new ReflectionStructType(size, name, pSlangTypeLayout));
+    return ref<ReflectionStructType>(new ReflectionStructType(size, name, pSlangTypeLayout));
 }
 
 ReflectionStructType::ReflectionStructType(size_t size, const std::string& name, slang::TypeLayoutReflection* pSlangTypeLayout)
     : ReflectionType(ReflectionType::Kind::Struct, size, pSlangTypeLayout), mName(name)
 {}
 
-ParameterBlockReflection::BindLocation ParameterBlockReflection::getResourceBinding(const std::string& name) const
+ParameterBlockReflection::BindLocation ParameterBlockReflection::getResourceBinding(std::string_view name) const
 {
     return getElementType()->getMemberOffset(name);
 }
 
-const ReflectionVar::SharedConstPtr ProgramReflection::getResource(const std::string& name) const
+const ref<const ReflectionVar> ProgramReflection::getResource(std::string_view name) const
 {
     return mpDefaultBlock->getResource(name);
 }
@@ -2398,8 +2367,8 @@ bool ReflectionVar::operator==(const ReflectionVar& other) const
     return true;
 }
 
-const ProgramReflection::ShaderVariable* getShaderAttribute(
-    const std::string& name,
+inline const ProgramReflection::ShaderVariable* getShaderAttribute(
+    std::string_view name,
     const ProgramReflection::VariableMap& varMap,
     const std::string& funcName
 )
@@ -2408,28 +2377,29 @@ const ProgramReflection::ShaderVariable* getShaderAttribute(
     return (it == varMap.end()) ? nullptr : &(it->second);
 }
 
-const ProgramReflection::ShaderVariable* ProgramReflection::getVertexAttributeBySemantic(const std::string& semantic) const
+const ProgramReflection::ShaderVariable* ProgramReflection::getVertexAttributeBySemantic(std::string_view semantic) const
 {
     return getShaderAttribute(semantic, mVertAttrBySemantic, "getVertexAttributeBySemantic()");
 }
 
-const ProgramReflection::ShaderVariable* ProgramReflection::getVertexAttribute(const std::string& name) const
+const ProgramReflection::ShaderVariable* ProgramReflection::getVertexAttribute(std::string_view name) const
 {
     return getShaderAttribute(name, mVertAttr, "getVertexAttribute()");
 }
 
-const ProgramReflection::ShaderVariable* ProgramReflection::getPixelShaderOutput(const std::string& name) const
+const ProgramReflection::ShaderVariable* ProgramReflection::getPixelShaderOutput(std::string_view name) const
 {
     return getShaderAttribute(name, mPsOut, "getPixelShaderOutput()");
 }
 
-ReflectionType::SharedPtr ProgramReflection::findType(const std::string& name) const
+ref<ReflectionType> ProgramReflection::findType(std::string_view name) const
 {
     auto iter = mMapNameToType.find(name);
     if (iter != mMapNameToType.end())
         return iter->second;
 
-    auto pSlangType = mpSlangReflector->findTypeByName(name.c_str());
+    std::string nameStr{name};
+    auto pSlangType = mpSlangReflector->findTypeByName(nameStr.c_str());
     if (!pSlangType)
         return nullptr;
     auto pSlangTypeLayout = mpSlangReflector->getTypeLayout(pSlangType);
@@ -2438,19 +2408,19 @@ ReflectionType::SharedPtr ProgramReflection::findType(const std::string& name) c
     if (!pFalcorTypeLayout)
         return nullptr;
 
-    mMapNameToType.insert(std::make_pair(name, pFalcorTypeLayout));
+    mMapNameToType.insert(std::make_pair(std::move(nameStr), pFalcorTypeLayout));
 
     return pFalcorTypeLayout;
 }
 
-ReflectionVar::SharedConstPtr ProgramReflection::findMember(const std::string& name) const
+ref<const ReflectionVar> ProgramReflection::findMember(std::string_view name) const
 {
     return mpDefaultBlock->findMember(name);
 }
 
-ReflectionInterfaceType::SharedPtr ReflectionInterfaceType::create(slang::TypeLayoutReflection* pSlangTypeLayout)
+ref<ReflectionInterfaceType> ReflectionInterfaceType::create(slang::TypeLayoutReflection* pSlangTypeLayout)
 {
-    return SharedPtr(new ReflectionInterfaceType(pSlangTypeLayout));
+    return ref<ReflectionInterfaceType>(new ReflectionInterfaceType(pSlangTypeLayout));
 }
 
 ReflectionInterfaceType::ReflectionInterfaceType(slang::TypeLayoutReflection* pSlangTypeLayout)
@@ -2477,6 +2447,201 @@ bool ReflectionInterfaceType::operator==(const ReflectionType& other) const
     if (!pOtherInterface)
         return false;
     return (*this == *pOtherInterface);
+}
+
+FALCOR_SCRIPT_BINDING(ReflectionArrayType)
+{
+    FALCOR_SCRIPT_BINDING_DEPENDENCY(ReflectionType)
+
+    pybind11::class_<ReflectionArrayType, ReflectionType, ref<ReflectionArrayType>> reflectionArrayType(m, "ReflectionArrayType");
+    reflectionArrayType.def_property_readonly("element_type", &ReflectionArrayType::getElementType);
+    reflectionArrayType.def_property_readonly("element_count", &ReflectionArrayType::getElementCount);
+    reflectionArrayType.def_property_readonly("element_byte_stride", &ReflectionArrayType::getElementByteStride);
+    reflectionArrayType.def(
+        "__repr__",
+        [](const ReflectionArrayType& self)
+        {
+            return fmt::format(
+                "ReflectionArrayType(element_type={}, element_count={}, element_byte_stride={})",
+                ScriptBindings::repr(self.getElementType()),
+                self.getElementCount(),
+                self.getElementByteStride()
+            );
+        }
+    );
+}
+
+FALCOR_SCRIPT_BINDING(ReflectionStructType)
+{
+    FALCOR_SCRIPT_BINDING_DEPENDENCY(ReflectionType)
+    FALCOR_SCRIPT_BINDING_DEPENDENCY(ReflectionVar)
+
+    pybind11::class_<ReflectionStructType, ReflectionType, ref<ReflectionStructType>> reflectionStructType(m, "ReflectionStructType");
+    reflectionStructType.def_property_readonly("name", &ReflectionStructType::getName);
+    reflectionStructType.def_property_readonly(
+        "members",
+        [](const ReflectionStructType& self)
+        {
+            pybind11::dict members;
+            for (size_t i = 0; i < self.getMemberCount(); i++)
+            {
+                auto member = self.getMember(i);
+                members[pybind11::str(member->getName())] = member;
+            }
+            return members;
+        }
+    );
+    reflectionStructType.def(
+        "__repr__",
+        [](const ReflectionStructType& self)
+        {
+            std::string members;
+            for (size_t i = 0; i < self.getMemberCount(); i++)
+            {
+                if (i > 0)
+                    members += ", ";
+                members += ScriptBindings::repr(self.getMember(i));
+            }
+            return fmt::format("ReflectionStructType(name={}, members=[{}])", ScriptBindings::repr(self.getName()), members);
+        }
+    );
+    reflectionStructType.def("__getitem__", [](ReflectionStructType& self, std::string_view name) { return self.getMember(name); });
+    reflectionStructType.def("__getitem__", [](ReflectionStructType& self, size_t index) { return self.getMember(index); });
+    reflectionStructType.def("__getattr__", [](ReflectionStructType& self, std::string_view name) { return self.getMember(name); });
+}
+
+FALCOR_SCRIPT_BINDING(ReflectionBasicType)
+{
+    FALCOR_SCRIPT_BINDING_DEPENDENCY(ReflectionType)
+
+    pybind11::class_<ReflectionBasicType, ReflectionType, ref<ReflectionBasicType>> reflectionBasicType(m, "ReflectionBasicType");
+
+    pybind11::falcor_enum<ReflectionBasicType::Type>(reflectionBasicType, "Type");
+
+    reflectionBasicType.def_property_readonly("type", &ReflectionBasicType::getType);
+    reflectionBasicType.def_property_readonly("is_row_major", &ReflectionBasicType::isRowMajor);
+    reflectionBasicType.def(
+        "__repr__",
+        [](const ReflectionBasicType& self)
+        { return fmt::format("ReflectionBasicType(type={}, is_row_major={})", ScriptBindings::repr(self.getType()), self.isRowMajor()); }
+    );
+}
+
+FALCOR_SCRIPT_BINDING(ReflectionResourceType)
+{
+    FALCOR_SCRIPT_BINDING_DEPENDENCY(ReflectionType)
+
+    pybind11::class_<ReflectionResourceType, ReflectionType, ref<ReflectionResourceType>> reflectionResourceType(
+        m, "ReflectionResourceType"
+    );
+
+    pybind11::falcor_enum<ReflectionResourceType::ShaderAccess>(reflectionResourceType, "ShaderAccess");
+    pybind11::falcor_enum<ReflectionResourceType::ReturnType>(reflectionResourceType, "ReturnType");
+    pybind11::falcor_enum<ReflectionResourceType::Dimensions>(reflectionResourceType, "Dimensions");
+    pybind11::falcor_enum<ReflectionResourceType::StructuredType>(reflectionResourceType, "StructuredType");
+    pybind11::falcor_enum<ReflectionResourceType::Type>(reflectionResourceType, "Type");
+
+    reflectionResourceType.def_property_readonly("type", &ReflectionResourceType::getType);
+    reflectionResourceType.def_property_readonly("size", &ReflectionResourceType::getSize);
+    reflectionResourceType.def_property_readonly("dimensions", &ReflectionResourceType::getDimensions);
+    reflectionResourceType.def_property_readonly("struct_type", &ReflectionResourceType::getStructType);
+    reflectionResourceType.def_property_readonly("structured_buffer_type", &ReflectionResourceType::getStructuredBufferType);
+    reflectionResourceType.def_property_readonly("return_type", &ReflectionResourceType::getReturnType);
+    reflectionResourceType.def_property_readonly("shader_access", &ReflectionResourceType::getShaderAccess);
+    reflectionResourceType.def(
+        "__repr__",
+        [](const ReflectionResourceType& self)
+        {
+            return fmt::format(
+                "ReflectionResourceType(type={}, size={}, dimensions={}, structured_buffer_type={}, return_type={}, shader_access={})",
+                ScriptBindings::repr(self.getType()),
+                self.getSize(),
+                ScriptBindings::repr(self.getDimensions()),
+                ScriptBindings::repr(self.getStructuredBufferType()),
+                ScriptBindings::repr(self.getReturnType()),
+                ScriptBindings::repr(self.getShaderAccess())
+            );
+        }
+    );
+}
+
+FALCOR_SCRIPT_BINDING(ReflectionInterfaceType)
+{
+    FALCOR_SCRIPT_BINDING_DEPENDENCY(ReflectionType)
+
+    pybind11::class_<ReflectionInterfaceType, ReflectionType, ref<ReflectionInterfaceType>> reflectionInterfaceType(
+        m, "ReflectionInterfaceType"
+    );
+
+    reflectionInterfaceType.def("__repr__", [](const ReflectionInterfaceType& self) { return "ReflectionInterfaceType()"; });
+}
+
+FALCOR_SCRIPT_BINDING(ReflectionType)
+{
+    pybind11::class_<ReflectionType, ref<ReflectionType>> reflectionType(m, "ReflectionType");
+
+    FALCOR_SCRIPT_BINDING_DEPENDENCY(ReflectionArrayType)
+    FALCOR_SCRIPT_BINDING_DEPENDENCY(ReflectionStructType)
+    FALCOR_SCRIPT_BINDING_DEPENDENCY(ReflectionBasicType)
+    FALCOR_SCRIPT_BINDING_DEPENDENCY(ReflectionResourceType)
+    FALCOR_SCRIPT_BINDING_DEPENDENCY(ReflectionInterfaceType)
+
+    pybind11::falcor_enum<ReflectionType::Kind>(reflectionType, "Kind");
+
+    reflectionType.def_property_readonly("kind", &ReflectionType::getKind);
+    reflectionType.def_property_readonly("as_array_type", &ReflectionType::asArrayType);
+    reflectionType.def_property_readonly("as_struct_type", &ReflectionType::asStructType);
+    reflectionType.def_property_readonly("as_basic_type", &ReflectionType::asBasicType);
+    reflectionType.def_property_readonly("as_resource_type", &ReflectionType::asResourceType);
+    reflectionType.def_property_readonly("as_interface_type", &ReflectionType::asInterfaceType);
+    reflectionType.def(
+        "__repr__", [](const ReflectionType& self) { return fmt::format("ReflectionType(kind={})", ScriptBindings::repr(self.getKind())); }
+    );
+}
+
+FALCOR_SCRIPT_BINDING(ReflectionVar)
+{
+    pybind11::class_<ReflectionVar, ref<ReflectionVar>> reflectionVar(m, "ReflectionVar");
+
+    FALCOR_SCRIPT_BINDING_DEPENDENCY(ReflectionType)
+
+    reflectionVar.def_property_readonly("name", &ReflectionVar::getName);
+    reflectionVar.def_property_readonly("type", &ReflectionVar::getType);
+    reflectionVar.def_property_readonly("offset", &ReflectionVar::getOffset);
+    reflectionVar.def(
+        "__repr__",
+        [](const ReflectionVar& self)
+        {
+            return fmt::format(
+                "ReflectionVar(name=\"{}\", type={}, offset={})", self.getName(), ScriptBindings::repr(self.getType()), self.getOffset()
+            );
+        }
+    );
+}
+
+FALCOR_SCRIPT_BINDING(ParameterBlockReflection)
+{
+    FALCOR_SCRIPT_BINDING_DEPENDENCY(ReflectionVar)
+
+    pybind11::class_<ParameterBlockReflection, ref<ParameterBlockReflection>> parameterBlockReflection(m, "ParameterBlockReflection");
+
+    parameterBlockReflection.def_property_readonly("element_type", &ParameterBlockReflection::getElementType);
+
+    parameterBlockReflection.def(
+        "__getitem__", [](ParameterBlockReflection& self, std::string_view name) { return self.getResource(name); }
+    );
+    parameterBlockReflection.def(
+        "__getattr__", [](ParameterBlockReflection& self, std::string_view name) { return self.getResource(name); }
+    );
+}
+
+FALCOR_SCRIPT_BINDING(ProgramReflection)
+{
+    FALCOR_SCRIPT_BINDING_DEPENDENCY(ParameterBlockReflection)
+
+    pybind11::class_<ProgramReflection, ref<ProgramReflection>> programReflection(m, "ProgramReflection");
+
+    programReflection.def_property_readonly("default_parameter_block", &ProgramReflection::getDefaultParameterBlock);
 }
 
 } // namespace Falcor

@@ -26,6 +26,8 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #include "Testbed.h"
+#include "Core/ObjectPython.h"
+#include "Core/AssetResolver.h"
 #include "Core/Program/ProgramManager.h"
 #include "Utils/Scripting/ScriptBindings.h"
 #include "Utils/Threading.h"
@@ -39,15 +41,6 @@
 namespace Falcor
 {
 
-namespace
-{
-/// Global pointer holding on to the first created Testbed instance.
-/// Currently, we are limited to only have one instance of the Testbed at runtime due to various global state in Falcor
-/// (such as the graphics device). We also want to keep the instance alive until the end of the runtime in order to
-/// allow graceful shutdown as some other objects that expect global state to still be available when shutting down.
-TestbedSharedPtr spTestbed;
-} // namespace
-
 Testbed::Testbed(const Options& options)
 {
     internalInit(options);
@@ -56,15 +49,6 @@ Testbed::Testbed(const Options& options)
 Testbed::~Testbed()
 {
     internalShutdown();
-}
-
-TestbedSharedPtr Testbed::create(const Options& options)
-{
-    if (spTestbed)
-        throw RuntimeError("Only one instance of Testbed can be created during the lifetime of the Falcor runtime.");
-
-    spTestbed = std::make_shared<Testbed>(options);
-    return spTestbed;
 }
 
 void Testbed::run()
@@ -78,6 +62,11 @@ void Testbed::run()
 void Testbed::interrupt()
 {
     mShouldInterrupt = true;
+}
+
+void Testbed::close()
+{
+    mShouldClose = true;
 }
 
 void Testbed::frame()
@@ -111,16 +100,22 @@ void Testbed::frame()
     // Execute the render graph.
     if (mpRenderGraph)
     {
-        (*mpRenderGraph->getPassesDictionary())[kRenderPassRefreshFlags] = RenderPassRefreshFlags::None;
+        mpRenderGraph->getPassesDictionary()[kRenderPassRefreshFlags] = RenderPassRefreshFlags::None;
         mpRenderGraph->execute(pRenderContext);
 
         // Blit main graph output to frame buffer.
         if (mpRenderGraph->getOutputCount() > 0)
         {
-            Texture::SharedPtr pOutTex = std::dynamic_pointer_cast<Texture>(mpRenderGraph->getOutput(0));
+            ref<Texture> pOutTex = mpRenderGraph->getOutput(0)->asTexture();
             FALCOR_ASSERT(pOutTex);
             pRenderContext->blit(pOutTex->getSRV(), mpTargetFBO->getRenderTargetView(0));
         }
+    }
+
+    // Blit the current render texture if set.
+    if (mpRenderTexture)
+    {
+        pRenderContext->blit(mpRenderTexture->getSRV(), mpTargetFBO->getRenderTargetView(0));
     }
 
     renderUI();
@@ -137,8 +132,7 @@ void Testbed::frame()
         Texture* pSwapchainImage = mpSwapchain->getImage(imageIndex).get();
         pRenderContext->copyResource(pSwapchainImage, mpTargetFBO->getColorTexture(0).get());
         pRenderContext->resourceBarrier(pSwapchainImage, Resource::State::Present);
-        pRenderContext->flush();
-        FALCOR_PROFILE_CUSTOM(pRenderContext, "present", Profiler::Flags::Internal);
+        pRenderContext->submit();
         mpSwapchain->present();
     }
 
@@ -160,15 +154,43 @@ void Testbed::resizeFrameBuffer(uint32_t width, uint32_t height)
     }
 }
 
-void Testbed::loadScene(const std::filesystem::path& path)
+void Testbed::loadScene(const std::filesystem::path& path, SceneBuilder::Flags buildFlags)
 {
-    mpScene = Scene::create(mpDevice, path);
+    mpScene = SceneBuilder(mpDevice, path, Settings(), buildFlags).getScene();
 
     if (mpRenderGraph)
         mpRenderGraph->setScene(mpScene);
 }
 
-void Testbed::setRenderGraph(const RenderGraph::SharedPtr& graph)
+void Testbed::loadSceneFromString(const std::string& scene, const std::string extension, SceneBuilder::Flags buildFlags)
+{
+    mpScene = SceneBuilder(mpDevice, scene.data(), scene.length(), extension, Settings(), buildFlags).getScene();
+
+    if (mpRenderGraph)
+        mpRenderGraph->setScene(mpScene);
+}
+
+ref<Scene> Testbed::getScene() const
+{
+    return mpScene;
+}
+
+Clock& Testbed::getClock()
+{
+    return mClock;
+}
+
+ref<RenderGraph> Testbed::createRenderGraph(const std::string& name)
+{
+    return RenderGraph::create(mpDevice, name);
+}
+
+ref<RenderGraph> Testbed::loadRenderGraph(const std::filesystem::path& path)
+{
+    return RenderGraph::createFromFile(mpDevice, path);
+}
+
+void Testbed::setRenderGraph(const ref<RenderGraph>& graph)
 {
     mpRenderGraph = graph;
 
@@ -179,17 +201,7 @@ void Testbed::setRenderGraph(const RenderGraph::SharedPtr& graph)
     }
 }
 
-Scene::SharedPtr Testbed::getScene() const
-{
-    return mpScene;
-}
-
-Clock& Testbed::getClock()
-{
-    return mClock;
-}
-
-const RenderGraph::SharedPtr& Testbed::getRenderGraph() const
+const ref<RenderGraph>& Testbed::getRenderGraph() const
 {
     return mpRenderGraph;
 }
@@ -219,12 +231,22 @@ void Testbed::handleKeyboardEvent(const KeyboardEvent& keyEvent)
 
     if (keyEvent.type == KeyboardEvent::Type::KeyPressed)
     {
-        if (keyEvent.key == Input::Key::Escape)
+        switch (keyEvent.key)
+        {
+        case Input::Key::Escape:
             interrupt();
-        if (keyEvent.key == Input::Key::F2)
+            close();
+            break;
+        case Input::Key::F2:
             mUI.showUI = !mUI.showUI;
-        if (keyEvent.key == Input::Key::P)
-            mpDevice->getProfiler()->setEnabled(mpDevice->getProfiler()->isEnabled());
+            break;
+        case Input::Key::F5:
+            mpDevice->getProgramManager()->reloadAllPrograms();
+            break;
+        case Input::Key::P:
+            mpDevice->getProfiler()->setEnabled(!mpDevice->getProfiler()->isEnabled());
+            break;
+        }
     }
 
     if (mpRenderGraph && mpRenderGraph->onKeyEvent(keyEvent))
@@ -264,8 +286,17 @@ void Testbed::internalInit(const Options& options)
     OSServices::start();
     Threading::start();
 
+    // Setup asset search paths.
+    AssetResolver& resolver = AssetResolver::getDefaultResolver();
+    resolver.addSearchPath(getProjectDirectory() / "media");
+    for (auto& path : Settings::getGlobalSettings().getSearchDirectories("media"))
+        resolver.addSearchPath(path);
+
     // Create the device.
-    mpDevice = Device::create(options.deviceDesc);
+    if (options.pDevice)
+        mpDevice = options.pDevice;
+    else
+        mpDevice = make_ref<Device>(options.deviceDesc);
 
     // Create the window & swapchain.
     if (options.createWindow)
@@ -279,24 +310,18 @@ void Testbed::internalInit(const Options& options)
         desc.height = mpWindow->getClientAreaSize().y;
         desc.imageCount = 3;
         desc.enableVSync = options.windowDesc.enableVSync;
-        mpSwapchain = std::make_unique<Swapchain>(mpDevice, desc, mpWindow->getApiHandle());
+        mpSwapchain = make_ref<Swapchain>(mpDevice, desc, mpWindow->getApiHandle());
     }
 
     // Create target frame buffer
     uint2 fboSize = mpWindow ? mpWindow->getClientAreaSize() : uint2(options.windowDesc.width, options.windowDesc.height);
-    mpTargetFBO = Fbo::create2D(mpDevice.get(), fboSize.x, fboSize.y, options.colorFormat, options.depthFormat);
-
-    // Set global shader defines.
-    Program::DefineList globalDefines = {
-        {"FALCOR_NVAPI_AVAILABLE", (FALCOR_NVAPI_AVAILABLE && mpDevice->getType() == Device::Type::D3D12) ? "1" : "0"},
-#if FALCOR_NVAPI_AVAILABLE
-        {"NV_SHADER_EXTN_SLOT", "u999"},
-#endif
-    };
-    mpDevice->getProgramManager()->addGlobalDefines(globalDefines);
+    mpTargetFBO = Fbo::create2D(mpDevice, fboSize.x, fboSize.y, options.colorFormat, options.depthFormat);
 
     // Create the GUI.
     mpGui = std::make_unique<Gui>(mpDevice, mpTargetFBO->getWidth(), mpTargetFBO->getHeight(), getDisplayScaleFactor());
+
+    // Create python UI screen.
+    mpScreen = make_ref<python_ui::Screen>();
 
     mFrameRate.reset();
 }
@@ -310,17 +335,16 @@ void Testbed::internalShutdown()
     mpScene.reset();
 
     if (mpDevice)
-        mpDevice->flushAndSync();
+        mpDevice->wait();
 
-    Clock::shutdown();
     Threading::shutdown();
 
+    mpScreen.reset();
     mpGui.reset();
     mpTargetFBO.reset();
 
     mpSwapchain.reset();
     mpWindow.reset();
-    mpDevice->cleanup();
     mpDevice.reset();
 #ifdef _DEBUG
     Device::reportLiveObjects();
@@ -333,7 +357,7 @@ void Testbed::resizeTargetFBO(uint32_t width, uint32_t height)
 {
     // Resize target frame buffer.
     auto pPrevFBO = mpTargetFBO;
-    mpTargetFBO = Fbo::create2D(mpDevice.get(), width, height, pPrevFBO->getDesc());
+    mpTargetFBO = Fbo::create2D(mpDevice, width, height, pPrevFBO->getDesc());
     mpDevice->getRenderContext()->blit(pPrevFBO->getColorTexture(0)->getSRV(), mpTargetFBO->getRenderTargetView(0));
 
     if (mpGui)
@@ -341,6 +365,9 @@ void Testbed::resizeTargetFBO(uint32_t width, uint32_t height)
 
     if (mpRenderGraph)
         mpRenderGraph->onResize(mpTargetFBO.get());
+
+    if (mpScene)
+        mpScene->setCameraAspectRatio(width / (float)height);
 }
 
 void Testbed::renderUI()
@@ -366,6 +393,7 @@ void Testbed::renderUI()
                 "ESC - Exit (or return to Python interpreter)\n"
                 "F1  - Show this help screen\n"
                 "F2  - Show/hide UI\n"
+                "F5  - Reload shaders\n"
                 "P   - Enable/disable profiler\n"
                 "\n"
             );
@@ -384,55 +412,57 @@ void Testbed::renderUI()
         if (mUI.showFPS)
         {
             Gui::Window w(
-                mpGui.get(), "##FPS", {0, 0}, {10, 10},
+                mpGui.get(),
+                "##FPS",
+                {0, 0},
+                {10, 10},
                 Gui::WindowFlags::AllowMove | Gui::WindowFlags::AutoResize | Gui::WindowFlags::SetFocus
             );
             w.text(mFrameRate.getMsg());
         }
 
-        // Profiler.
-        {
-            if (pProfiler->isEnabled())
-            {
-                bool open = pProfiler->isEnabled();
-                Gui::Window profilerWindow(mpGui.get(), "Profiler", open, {800, 350}, {10, 10});
-                pProfiler->endEvent(pRenderContext, "renderUI"); // Suspend renderUI profiler event
-
-                if (open)
-                {
-                    if (!mpProfilerUI)
-                        mpProfilerUI = std::make_unique<ProfilerUI>(pProfiler);
-
-                    mpProfilerUI->render();
-                    pProfiler->startEvent(pRenderContext, "renderUI");
-                    profilerWindow.release();
-                }
-
-                pProfiler->setEnabled(open);
-            }
-        }
-
+        if (mpRenderGraph)
         {
             Gui::Window w(mpGui.get(), "Render Graph", {300, 300}, {10, 50});
-            if (mpRenderGraph)
-                mpRenderGraph->renderUI(pRenderContext, w);
-            else
-                w.text("No render graph loaded");
+            mpRenderGraph->renderUI(pRenderContext, w);
         }
 
+        if (mpScene)
         {
             Gui::Window w(mpGui.get(), "Scene", {300, 300}, {10, 360});
-            if (mpScene)
-                mpScene->renderUI(w);
-            else
-                w.text("No scene loaded");
+            mpScene->renderUI(w);
+        }
+
+        // Render Python UI.
+        mpScreen->render();
+    }
+
+    // Profiler.
+    {
+        if (pProfiler->isEnabled())
+        {
+            bool open = pProfiler->isEnabled();
+            Gui::Window profilerWindow(mpGui.get(), "Profiler", open, {800, 350}, {10, 10});
+            pProfiler->endEvent(pRenderContext, "renderUI"); // Suspend renderUI profiler event
+
+            if (open)
+            {
+                if (!mpProfilerUI)
+                    mpProfilerUI = std::make_unique<ProfilerUI>(pProfiler);
+
+                mpProfilerUI->render();
+                pProfiler->startEvent(pRenderContext, "renderUI");
+                profilerWindow.release();
+            }
+
+            pProfiler->setEnabled(open);
         }
     }
 
     mpGui->render(pRenderContext, mpTargetFBO, (float)mFrameRate.getLastFrameTime());
 }
 
-void Testbed::captureOutput(std::string filename, uint32_t outputIndex)
+void Testbed::captureOutput(const std::filesystem::path& path, uint32_t outputIndex)
 {
     if (!mpImageProcessing)
         mpImageProcessing = std::make_unique<ImageProcessing>(mpDevice);
@@ -440,9 +470,9 @@ void Testbed::captureOutput(std::string filename, uint32_t outputIndex)
     RenderContext* pRenderContext = mpDevice->getRenderContext();
 
     const std::string outputName = mpRenderGraph->getOutputName(outputIndex);
-    const Texture::SharedPtr pOutput = mpRenderGraph->getOutput(outputName)->asTexture();
+    const ref<Texture> pOutput = mpRenderGraph->getOutput(outputName)->asTexture();
     if (!pOutput)
-        throw RuntimeError("Graph output {} is not a texture", outputName);
+        FALCOR_THROW("Graph output {} is not a texture", outputName);
 
     const ResourceFormat format = pOutput->getFormat();
     const uint32_t channels = getFormatChannelCount(format);
@@ -484,7 +514,7 @@ void Testbed::captureOutput(std::string filename, uint32_t outputIndex)
         }
 
         // Copy relevant channels into new texture if necessary.
-        Texture::SharedPtr pTex = pOutput;
+        ref<Texture> pTex = pOutput;
         if (outputChannels == 1 && channels > 1)
         {
             // Determine output format.
@@ -543,14 +573,20 @@ void Testbed::captureOutput(std::string filename, uint32_t outputIndex)
             if (is_set(mask, TextureChannelFlags::RGB) && isSrgbFormat(format))
             {
                 logWarning(
-                    "Graph output {} mask {:#x} extracting single RGB channel from SRGB format may lose precision.", outputName,
+                    "Graph output {} mask {:#x} extracting single RGB channel from SRGB format may lose precision.",
+                    outputName,
                     (uint32_t)mask
                 );
             }
 
             // Copy color channel into temporary texture.
-            pTex = Texture::create2D(
-                mpDevice.get(), pOutput->getWidth(), pOutput->getHeight(), outputFormat, 1, 1, nullptr,
+            pTex = mpDevice->createTexture2D(
+                pOutput->getWidth(),
+                pOutput->getHeight(),
+                outputFormat,
+                1,
+                1,
+                nullptr,
                 ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess
             );
             mpImageProcessing->copyColorChannel(pRenderContext, pOutput->getSRV(0, 1, 0, 1), pTex->getUAV(), mask);
@@ -563,41 +599,80 @@ void Testbed::captureOutput(std::string filename, uint32_t outputIndex)
         if (mask == TextureChannelFlags::RGBA)
             flags |= Bitmap::ExportFlags::ExportAlpha;
 
-        pTex->captureToFile(0, 0, filename, fileformat, flags);
+        pTex->captureToFile(0, 0, path, fileformat, flags, false /* async */);
     }
 }
 
 FALCOR_SCRIPT_BINDING(Testbed)
 {
+    FALCOR_SCRIPT_BINDING_DEPENDENCY(Device)
+    FALCOR_SCRIPT_BINDING_DEPENDENCY(RenderGraph)
+    FALCOR_SCRIPT_BINDING_DEPENDENCY(Clock)
+    FALCOR_SCRIPT_BINDING_DEPENDENCY(Profiler)
+    FALCOR_SCRIPT_BINDING_DEPENDENCY(Scene)
+    FALCOR_SCRIPT_BINDING_DEPENDENCY(SceneBuilder)
+    FALCOR_SCRIPT_BINDING_DEPENDENCY(python_ui);
+
     using namespace pybind11::literals;
 
-    pybind11::class_<Testbed, std::shared_ptr<Testbed>> testbed(m, "Testbed");
+    pybind11::class_<Testbed, ref<Testbed>> testbed(m, "Testbed");
 
-    auto createTestbed = [](uint32_t width, uint32_t height, bool createWindow, uint32_t gpu)
-    {
-        Testbed::Options options;
-        options.windowDesc.width = width;
-        options.windowDesc.height = height;
-        options.createWindow = createWindow;
-        options.deviceDesc.gpu = gpu;
-        return Testbed::create(options);
-    };
-
-    Testbed::Options defaultOptions;
     testbed.def(
-        pybind11::init(createTestbed), "width"_a = defaultOptions.windowDesc.width, "height"_a = defaultOptions.windowDesc.height,
-        "createWindow"_a = defaultOptions.createWindow, "gpu"_a = defaultOptions.deviceDesc.gpu
+        pybind11::init(
+            [](uint32_t width,
+               uint32_t height,
+               bool create_window,
+               Device::Type device_type,
+               uint32_t gpu,
+               bool enable_debug_layers,
+               bool enable_aftermath,
+               ref<Device> device)
+            {
+                Testbed::Options options;
+                options.pDevice = device;
+                options.windowDesc.width = width;
+                options.windowDesc.height = height;
+                options.createWindow = create_window;
+                options.deviceDesc.type = device_type;
+                options.deviceDesc.gpu = gpu;
+                options.deviceDesc.enableDebugLayer = enable_debug_layers;
+                options.deviceDesc.enableAftermath = enable_aftermath;
+                return Testbed::create(options);
+            }
+        ),
+        "width"_a = 1920,
+        "height"_a = 1080,
+        "create_window"_a = false,
+        "device_type"_a = Device::Type::Default,
+        "gpu"_a = 0,
+        "enable_debug_layers"_a = false,
+        "enable_aftermath"_a = false,
+        "device"_a = nullptr
     );
     testbed.def("run", &Testbed::run);
     testbed.def("frame", &Testbed::frame);
-    testbed.def("resizeFrameBuffer", &Testbed::resizeFrameBuffer, "width"_a, "height"_a);
-    testbed.def("loadScene", &Testbed::loadScene, "path"_a);
-    testbed.def("captureOutput", &Testbed::captureOutput, "filename"_a, pybind11::arg("outputIndex") = uint32_t(0)); // PYTHONDEPRECATED
+    testbed.def("resize_frame_buffer", &Testbed::resizeFrameBuffer, "width"_a, "height"_a);
+    testbed.def("load_scene", &Testbed::loadScene, "path"_a, "build_flags"_a = SceneBuilder::Flags::Default);
+    testbed.def(
+        "load_scene_from_string",
+        &Testbed::loadSceneFromString,
+        "scene"_a,
+        "extension"_a = "pyscene",
+        "build_flags"_a = SceneBuilder::Flags::Default
+    );
+    testbed.def("create_render_graph", &Testbed::createRenderGraph, "name"_a = "");
+    testbed.def("load_render_graph", &Testbed::loadRenderGraph, "path"_a);
+    testbed.def("capture_output", &Testbed::captureOutput, "path"_a, "output_index"_a = uint32_t(0)); // PYTHONDEPRECATED
     testbed.def_property_readonly("profiler", [](Testbed* pTestbed) { return pTestbed->getDevice()->getProfiler(); });
 
+    testbed.def_property_readonly("device", &Testbed::getDevice);
     testbed.def_property_readonly("scene", &Testbed::getScene);
     testbed.def_property_readonly("clock", &Testbed::getClock); // PYTHONDEPRECATED
-    testbed.def_property("renderGraph", &Testbed::getRenderGraph, &Testbed::setRenderGraph);
+    testbed.def_property("render_graph", &Testbed::getRenderGraph, &Testbed::setRenderGraph);
+    testbed.def_property("render_texture", &Testbed::getRenderTexture, &Testbed::setRenderTexture);
+    testbed.def_property_readonly("screen", &Testbed::getScreen);
+    testbed.def_property("show_ui", &Testbed::getShowUI, &Testbed::setShowUI);
+    testbed.def_property_readonly("should_close", &Testbed::shouldClose);
 }
 
 } // namespace Falcor

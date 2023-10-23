@@ -16,15 +16,22 @@ project(Falcor
 # Configuration options
 # -----------------------------------------------------------------------------
 
-# Enable/disable reporting Falcor exceptions as fatal errors before actually throwing them.
-# This allows to break into the debugger at the location where an exception is thrown.
-set(FALCOR_REPORT_EXCEPTION_AS_ERROR OFF CACHE BOOL "Report Falcor exceptions as fatal errors (and break into debugger)")
+# Enable/disable asserts. AUTO enables asserts in debug builds.
+set(FALCOR_ENABLE_ASSERTS "AUTO" CACHE STRING "Enable asserts")
+set_property(CACHE FALCOR_ENABLE_ASSERTS PROPERTY STRINGS AUTO ON OFF)
+
+# Enable/disable the profiler.
+set(FALCOR_ENABLE_PROFILER ON CACHE BOOL "Enable profiler")
 
 # Enable/disable using system Python distribution. This requires Python 3.7 to be available.
 set(FALCOR_USE_SYSTEM_PYTHON OFF CACHE BOOL "Use system Python distribution")
 
 # Enable/disable USD.
 set(FALCOR_ENABLE_USD ON CACHE BOOL "Enable USD")
+
+
+# Enable/disable Address Sanitizer.
+set(FALCOR_ENABLE_ASAN OFF CACHE BOOL "Enable Address Sanitizer")
 
 # Header validation.
 # If enabled, additional targets are generated to validate that headers are self sufficient.
@@ -101,9 +108,12 @@ include(git_version)
 git_version_setup()
 
 # On Linux, we build with RPATH set to $ORIGIN to make build relocatable.
+# Also, we link with precompiled libraries that are compiled with _GLIBCXX_USE_CXX11_ABI=0,
+# so we need to compile with the same flag to avoid ABI incompatibilities.
 if(FALCOR_LINUX)
     set(CMAKE_INSTALL_RPATH $ORIGIN)
     set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
+    set(CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS} -D_GLIBCXX_USE_CXX11_ABI=0)
 endif()
 
 # -----------------------------------------------------------------------------
@@ -133,7 +143,7 @@ set(FALCOR_HAS_CUDA OFF)
 # Python
 # -----------------------------------------------------------------------------
 if(FALCOR_USE_SYSTEM_PYTHON)
-    find_package(Python 3.7 EXACT COMPONENTS Interpreter Development REQUIRED)
+    find_package(Python COMPONENTS Interpreter Development REQUIRED)
 else()
     set(Python_ROOT_DIR ${CMAKE_SOURCE_DIR}/external/packman/python)
     find_package(Python COMPONENTS Interpreter Development REQUIRED)
@@ -193,6 +203,7 @@ add_subdirectory(external)
 message(STATUS "Feature flags:")
 message(STATUS "FALCOR_HAS_D3D12: ${FALCOR_HAS_D3D12}")
 message(STATUS "FALCOR_HAS_VULKAN: ${FALCOR_HAS_VULKAN}")
+message(STATUS "FALCOR_HAS_AFTERMATH: ${FALCOR_HAS_AFTERMATH}")
 message(STATUS "FALCOR_HAS_NVAPI: ${FALCOR_HAS_NVAPI}")
 message(STATUS "FALCOR_HAS_PIX: ${FALCOR_HAS_PIX}")
 message(STATUS "FALCOR_HAS_CUDA: ${FALCOR_HAS_CUDA}")
@@ -202,7 +213,6 @@ message(STATUS "FALCOR_HAS_NRD: ${FALCOR_HAS_NRD}")
 message(STATUS "FALCOR_HAS_DLSS: ${FALCOR_HAS_DLSS}")
 message(STATUS "FALCOR_HAS_NV_USD: ${FALCOR_HAS_NV_USD}")
 message(STATUS "FALCOR_HAS_MDL_SDK: ${FALCOR_HAS_MDL_SDK}")
-message(STATUS "FALCOR_HAS_OPENSUBDIV: ${FALCOR_HAS_OPENSUBDIV}")
 message(STATUS "FALCOR_ENABLE_USD: ${FALCOR_ENABLE_USD}")
 
 # -----------------------------------------------------------------------------
@@ -417,6 +427,7 @@ endif()
 # Project sources
 # -----------------------------------------------------------------------------
 add_subdirectory(Source/Falcor)
+add_subdirectory(Source/Modules)
 add_subdirectory(Source/Mogwai)
 add_subdirectory(Source/plugins)
 add_subdirectory(Source/RenderPasses)
@@ -442,12 +453,13 @@ if(plugin_targets)
 endif()
 
 # Generate settings.toml file.
-file(GENERATE OUTPUT ${FALCOR_OUTPUT_DIRECTORY}/settings.json CONTENT "{ \"standardsearchpath\" : { \"media\" : \"\${FALCOR_MEDIA_FOLDERS}\"}}")
+file(GENERATE OUTPUT ${FALCOR_OUTPUT_DIRECTORY}/settings.json CONTENT "{ \"standardsearchpath\" : { \"media\" : \"\${FALCOR_MEDIA_FOLDERS}\", \"mdl\" : \"\${FALCOR_MDL_PATHS}\" }}")
 
 # Make Mogwai and FalcorPython depend on all plugins.
 if(plugin_targets)
     add_dependencies(Mogwai ${plugin_targets})
     add_dependencies(FalcorPython ${plugin_targets})
+    add_dependencies(Mogwai FalcorPython)
 endif()
 
 # Make Mogwai the default startup project in VS.

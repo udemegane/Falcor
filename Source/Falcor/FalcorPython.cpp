@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -49,10 +49,11 @@ static bool isLoadedFromEmbeddedPython()
     return false;
 }
 
-PYBIND11_MODULE(falcor, m)
+PYBIND11_MODULE(falcor_ext, m)
 {
     if (!isLoadedFromEmbeddedPython())
     {
+        Falcor::Logger::setOutputs(Falcor::Logger::OutputFlags::Console | Falcor::Logger::OutputFlags::DebugWindow);
         Falcor::Device::enableAgilitySDK();
         Falcor::PluginManager::instance().loadAllPlugins();
     }

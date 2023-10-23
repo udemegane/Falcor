@@ -30,19 +30,9 @@
 
 static void regAccumulatePass(pybind11::module& m)
 {
-    pybind11::class_<AccumulatePass, RenderPass, AccumulatePass::SharedPtr> pass(m, "AccumulatePass");
+    pybind11::class_<AccumulatePass, RenderPass, ref<AccumulatePass>> pass(m, "AccumulatePass");
     pass.def_property("enabled", &AccumulatePass::isEnabled, &AccumulatePass::setEnabled);
     pass.def("reset", &AccumulatePass::reset);
-
-    pybind11::enum_<AccumulatePass::Precision> precision(m, "AccumulatePrecision");
-    precision.value("Double", AccumulatePass::Precision::Double);
-    precision.value("Single", AccumulatePass::Precision::Single);
-    precision.value("SingleCompensated", AccumulatePass::Precision::SingleCompensated);
-
-    pybind11::enum_<AccumulatePass::OverflowMode> overflowMode(m, "AccumulateOverflowMode");
-    overflowMode.value("Stop", AccumulatePass::OverflowMode::Stop);
-    overflowMode.value("Reset", AccumulatePass::OverflowMode::Reset);
-    overflowMode.value("EMA", AccumulatePass::OverflowMode::EMA);
 }
 
 extern "C" FALCOR_API_EXPORT void registerPlugin(Falcor::PluginRegistry& registry)
@@ -53,79 +43,71 @@ extern "C" FALCOR_API_EXPORT void registerPlugin(Falcor::PluginRegistry& registr
 
 namespace
 {
-    const char kShaderFile[] = "RenderPasses/AccumulatePass/Accumulate.cs.slang";
+const char kShaderFile[] = "RenderPasses/AccumulatePass/Accumulate.cs.slang";
 
-    const char kInputChannel[] = "input";
-    const char kOutputChannel[] = "output";
+const char kInputChannel[] = "input";
+const char kOutputChannel[] = "output";
 
-    // Serialized parameters
-    const char kEnabled[] = "enabled";
-    const char kOutputFormat[] = "outputFormat";
-    const char kOutputSize[] = "outputSize";
-    const char kFixedOutputSize[] = "fixedOutputSize";
-    const char kAutoReset[] = "autoReset";
-    const char kPrecisionMode[] = "precisionMode";
-    const char kMaxFrameCount[] = "maxFrameCount";
-    const char kOverflowMode[] = "overflowMode";
+// Serialized parameters
+const char kEnabled[] = "enabled";
+const char kOutputFormat[] = "outputFormat";
+const char kOutputSize[] = "outputSize";
+const char kFixedOutputSize[] = "fixedOutputSize";
+const char kAutoReset[] = "autoReset";
+const char kPrecisionMode[] = "precisionMode";
+const char kMaxFrameCount[] = "maxFrameCount";
+const char kOverflowMode[] = "overflowMode";
+} // namespace
 
-    const Gui::DropdownList kModeSelectorList =
-    {
-        { (uint32_t)AccumulatePass::Precision::Double, "Double precision" },
-        { (uint32_t)AccumulatePass::Precision::Single, "Single precision" },
-        { (uint32_t)AccumulatePass::Precision::SingleCompensated, "Single precision (compensated)" },
-    };
-
-    const Gui::DropdownList kOverflowModeList =
-    {
-        { (uint32_t)AccumulatePass::OverflowMode::Stop, "Stop" },
-        { (uint32_t)AccumulatePass::OverflowMode::Reset, "Reset" },
-        { (uint32_t)AccumulatePass::OverflowMode::EMA, "EMA" },
-    };
-}
-
-AccumulatePass::SharedPtr AccumulatePass::create(std::shared_ptr<Device> pDevice, const Dictionary& dict)
-{
-    return SharedPtr(new AccumulatePass(std::move(pDevice), dict));
-}
-
-AccumulatePass::AccumulatePass(std::shared_ptr<Device> pDevice, const Dictionary& dict)
-    : RenderPass(std::move(pDevice))
+AccumulatePass::AccumulatePass(ref<Device> pDevice, const Properties& props) : RenderPass(pDevice)
 {
     // Deserialize pass from dictionary.
-    for (const auto& [key, value] : dict)
+    for (const auto& [key, value] : props)
     {
-        if (key == kEnabled) mEnabled = value;
-        else if (key == kOutputFormat) mOutputFormat = value;
-        else if (key == kOutputSize) mOutputSizeSelection = value;
-        else if (key == kFixedOutputSize) mFixedOutputSize = value;
-        else if (key == kAutoReset) mAutoReset = value;
-        else if (key == kPrecisionMode) mPrecisionMode = value;
-        else if (key == kMaxFrameCount) mMaxFrameCount = value;
-        else if (key == kOverflowMode) mOverflowMode = value;
-        else logWarning("Unknown field '{}' in AccumulatePass dictionary.", key);
+        if (key == kEnabled)
+            mEnabled = value;
+        else if (key == kOutputFormat)
+            mOutputFormat = value;
+        else if (key == kOutputSize)
+            mOutputSizeSelection = value;
+        else if (key == kFixedOutputSize)
+            mFixedOutputSize = value;
+        else if (key == kAutoReset)
+            mAutoReset = value;
+        else if (key == kPrecisionMode)
+            mPrecisionMode = value;
+        else if (key == kMaxFrameCount)
+            mMaxFrameCount = value;
+        else if (key == kOverflowMode)
+            mOverflowMode = value;
+        else
+            logWarning("Unknown property '{}' in AccumulatePass properties.", key);
     }
 
-    if (dict.keyExists("enableAccumulation"))
+    if (props.has("enableAccumulation"))
     {
         logWarning("'enableAccumulation' is deprecated. Use 'enabled' instead.");
-        if (!dict.keyExists(kEnabled)) mEnabled = dict["enableAccumulation"];
+        if (!props.has(kEnabled))
+            mEnabled = props["enableAccumulation"];
     }
 
     mpState = ComputeState::create(mpDevice);
 }
 
-Dictionary AccumulatePass::getScriptingDictionary()
+Properties AccumulatePass::getProperties() const
 {
-    Dictionary dict;
-    dict[kEnabled] = mEnabled;
-    if (mOutputFormat != ResourceFormat::Unknown) dict[kOutputFormat] = mOutputFormat;
-    dict[kOutputSize] = mOutputSizeSelection;
-    if (mOutputSizeSelection == RenderPassHelpers::IOSize::Fixed) dict[kFixedOutputSize] = mFixedOutputSize;
-    dict[kAutoReset] = mAutoReset;
-    dict[kPrecisionMode] = mPrecisionMode;
-    dict[kMaxFrameCount] = mMaxFrameCount;
-    dict[kOverflowMode] = mOverflowMode;
-    return dict;
+    Properties props;
+    props[kEnabled] = mEnabled;
+    if (mOutputFormat != ResourceFormat::Unknown)
+        props[kOutputFormat] = mOutputFormat;
+    props[kOutputSize] = mOutputSizeSelection;
+    if (mOutputSizeSelection == RenderPassHelpers::IOSize::Fixed)
+        props[kFixedOutputSize] = mFixedOutputSize;
+    props[kAutoReset] = mAutoReset;
+    props[kPrecisionMode] = mPrecisionMode;
+    props[kMaxFrameCount] = mMaxFrameCount;
+    props[kOverflowMode] = mOverflowMode;
+    return props;
 }
 
 RenderPassReflection AccumulatePass::reflect(const CompileData& compileData)
@@ -135,7 +117,10 @@ RenderPassReflection AccumulatePass::reflect(const CompileData& compileData)
     const auto fmt = mOutputFormat != ResourceFormat::Unknown ? mOutputFormat : ResourceFormat::RGBA32Float;
 
     reflector.addInput(kInputChannel, "Input data to be temporally accumulated").bindFlags(ResourceBindFlags::ShaderResource);
-    reflector.addOutput(kOutputChannel, "Output data that is temporally accumulated").bindFlags(ResourceBindFlags::RenderTarget | ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource).format(fmt).texture2D(sz.x, sz.y);
+    reflector.addOutput(kOutputChannel, "Output data that is temporally accumulated")
+        .bindFlags(ResourceBindFlags::RenderTarget | ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource)
+        .format(fmt)
+        .texture2D(sz.x, sz.y);
     return reflector;
 }
 
@@ -148,7 +133,8 @@ void AccumulatePass::execute(RenderContext* pRenderContext, const RenderData& re
         auto refreshFlags = dict.getValue(kRenderPassRefreshFlags, RenderPassRefreshFlags::None);
 
         // If any refresh flag is set, we reset frame accumulation.
-        if (refreshFlags != RenderPassRefreshFlags::None) reset();
+        if (refreshFlags != RenderPassRefreshFlags::None)
+            reset();
 
         // Reset accumulation upon all scene changes, except camera jitter and history changes.
         // TODO: Add UI options to select which changes should trigger reset
@@ -163,11 +149,8 @@ void AccumulatePass::execute(RenderContext* pRenderContext, const RenderData& re
             {
                 auto excluded = Camera::Changes::Jitter | Camera::Changes::History;
                 auto cameraChanges = mpScene->getCamera()->getChanges();
-                if ((cameraChanges & ~excluded) != Camera::Changes::None) reset();
-            }
-            if (is_set(sceneUpdates, Scene::UpdateFlags::SDFGeometryChanged))
-            {
-                reset();
+                if ((cameraChanges & ~excluded) != Camera::Changes::None)
+                    reset();
             }
         }
     }
@@ -188,22 +171,23 @@ void AccumulatePass::execute(RenderContext* pRenderContext, const RenderData& re
     }
 
     // Grab our input/output buffers.
-    Texture::SharedPtr pSrc = renderData.getTexture(kInputChannel);
-    Texture::SharedPtr pDst = renderData.getTexture(kOutputChannel);
+    ref<Texture> pSrc = renderData.getTexture(kInputChannel);
+    ref<Texture> pDst = renderData.getTexture(kOutputChannel);
     FALCOR_ASSERT(pSrc && pDst);
 
     const uint2 resolution = uint2(pSrc->getWidth(), pSrc->getHeight());
     const bool resolutionMatch = pDst->getWidth() == resolution.x && pDst->getHeight() == resolution.y;
 
     // Reset accumulation when resolution changes.
-    if (resolution != mFrameDim)
+    if (any(resolution != mFrameDim))
     {
         mFrameDim = resolution;
         reset();
     }
 
     // Verify that output is non-integer format. It shouldn't be since reflect() requests a floating-point format.
-    if (isIntegerFormat(pDst->getFormat())) throw RuntimeError("AccumulatePass: Output to integer format is not supported");
+    if (isIntegerFormat(pDst->getFormat()))
+        FALCOR_THROW("AccumulatePass: Output to integer format is not supported");
 
     // Issue error and disable pass if unsupported I/O size. The user can hit continue and fix the config or abort.
     if (mEnabled && !resolutionMatch)
@@ -233,7 +217,7 @@ void AccumulatePass::execute(RenderContext* pRenderContext, const RenderData& re
     }
 }
 
-void AccumulatePass::accumulate(RenderContext* pRenderContext, const Texture::SharedPtr& pSrc, const Texture::SharedPtr& pDst)
+void AccumulatePass::accumulate(RenderContext* pRenderContext, const ref<Texture>& pSrc, const ref<Texture>& pDst)
 {
     FALCOR_ASSERT(pSrc && pDst);
     FALCOR_ASSERT(pSrc->getWidth() == mFrameDim.x && pSrc->getHeight() == mFrameDim.y);
@@ -243,25 +227,33 @@ void AccumulatePass::accumulate(RenderContext* pRenderContext, const Texture::Sh
     // If for the first time, or if the input format type has changed, (re)compile the programs.
     if (mpProgram.empty() || srcType != mSrcType)
     {
-        Program::DefineList defines;
+        DefineList defines;
         switch (srcType)
         {
-            case FormatType::Uint:
-                defines.add("_INPUT_FORMAT", "INPUT_FORMAT_UINT");
-                break;
-            case FormatType::Sint:
-                defines.add("_INPUT_FORMAT", "INPUT_FORMAT_SINT");
-                break;
-            default:
-                defines.add("_INPUT_FORMAT", "INPUT_FORMAT_FLOAT");
-                break;
+        case FormatType::Uint:
+            defines.add("_INPUT_FORMAT", "INPUT_FORMAT_UINT");
+            break;
+        case FormatType::Sint:
+            defines.add("_INPUT_FORMAT", "INPUT_FORMAT_SINT");
+            break;
+        default:
+            defines.add("_INPUT_FORMAT", "INPUT_FORMAT_FLOAT");
+            break;
         }
         // Create accumulation programs.
         // Note only compensated summation needs precise floating-point mode.
-        mpProgram[Precision::Double] = ComputeProgram::createFromFile(mpDevice, kShaderFile, "accumulateDouble", defines, Shader::CompilerFlags::TreatWarningsAsErrors);
-        mpProgram[Precision::Single] = ComputeProgram::createFromFile(mpDevice, kShaderFile, "accumulateSingle", defines, Shader::CompilerFlags::TreatWarningsAsErrors);
-        mpProgram[Precision::SingleCompensated] = ComputeProgram::createFromFile(mpDevice, kShaderFile, "accumulateSingleCompensated", defines, Shader::CompilerFlags::FloatingPointModePrecise | Shader::CompilerFlags::TreatWarningsAsErrors);
-        mpVars = ComputeVars::create(mpDevice, mpProgram[mPrecisionMode]->getReflector());
+        mpProgram[Precision::Double] =
+            Program::createCompute(mpDevice, kShaderFile, "accumulateDouble", defines, SlangCompilerFlags::TreatWarningsAsErrors);
+        mpProgram[Precision::Single] =
+            Program::createCompute(mpDevice, kShaderFile, "accumulateSingle", defines, SlangCompilerFlags::TreatWarningsAsErrors);
+        mpProgram[Precision::SingleCompensated] = Program::createCompute(
+            mpDevice,
+            kShaderFile,
+            "accumulateSingleCompensated",
+            defines,
+            SlangCompilerFlags::FloatingPointModePrecise | SlangCompilerFlags::TreatWarningsAsErrors
+        );
+        mpVars = ProgramVars::create(mpDevice, mpProgram[mPrecisionMode]->getReflector());
 
         mSrcType = srcType;
     }
@@ -270,18 +262,19 @@ void AccumulatePass::accumulate(RenderContext* pRenderContext, const Texture::Sh
     prepareAccumulation(pRenderContext, mFrameDim.x, mFrameDim.y);
 
     // Set shader parameters.
-    mpVars["PerFrameCB"]["gResolution"] = mFrameDim;
-    mpVars["PerFrameCB"]["gAccumCount"] = mFrameCount;
-    mpVars["PerFrameCB"]["gAccumulate"] = mEnabled;
-    mpVars["PerFrameCB"]["gMovingAverageMode"] = (mMaxFrameCount > 0);
-    mpVars["gCurFrame"] = pSrc;
-    mpVars["gOutputFrame"] = pDst;
+    auto var = mpVars->getRootVar();
+    var["PerFrameCB"]["gResolution"] = mFrameDim;
+    var["PerFrameCB"]["gAccumCount"] = mFrameCount;
+    var["PerFrameCB"]["gAccumulate"] = mEnabled;
+    var["PerFrameCB"]["gMovingAverageMode"] = (mMaxFrameCount > 0);
+    var["gCurFrame"] = pSrc;
+    var["gOutputFrame"] = pDst;
 
     // Bind accumulation buffers. Some of these may be nullptr's.
-    mpVars["gLastFrameSum"] = mpLastFrameSum;
-    mpVars["gLastFrameCorr"] = mpLastFrameCorr;
-    mpVars["gLastFrameSumLo"] = mpLastFrameSumLo;
-    mpVars["gLastFrameSumHi"] = mpLastFrameSumHi;
+    var["gLastFrameSum"] = mpLastFrameSum;
+    var["gLastFrameCorr"] = mpLastFrameCorr;
+    var["gLastFrameSumLo"] = mpLastFrameSumLo;
+    var["gLastFrameSumHi"] = mpLastFrameSumHi;
 
     // Update the frame count.
     // The accumulation limit (mMaxFrameCount) has a special value of 0 (no limit) and is not supported in the SingleCompensated mode.
@@ -302,22 +295,26 @@ void AccumulatePass::renderUI(Gui::Widgets& widget)
 {
     // Controls for output size.
     // When output size requirements change, we'll trigger a graph recompile to update the render pass I/O sizes.
-    if (widget.dropdown("Output size", RenderPassHelpers::kIOSizeList, (uint32_t&)mOutputSizeSelection)) requestRecompile();
+    if (widget.dropdown("Output size", mOutputSizeSelection))
+        requestRecompile();
     if (mOutputSizeSelection == RenderPassHelpers::IOSize::Fixed)
     {
-        if (widget.var("Size in pixels", mFixedOutputSize, 32u, 16384u)) requestRecompile();
+        if (widget.var("Size in pixels", mFixedOutputSize, 32u, 16384u))
+            requestRecompile();
     }
 
-    if (bool enabled = isEnabled(); widget.checkbox("Enabled", enabled)) setEnabled(enabled);
+    if (bool enabled = isEnabled(); widget.checkbox("Enabled", enabled))
+        setEnabled(enabled);
 
     if (mEnabled)
     {
-        if (widget.button("Reset", true)) reset();
+        if (widget.button("Reset", true))
+            reset();
 
         widget.checkbox("Auto Reset", mAutoReset);
         widget.tooltip("Reset accumulation automatically upon scene changes and refresh flags.");
 
-        if (widget.dropdown("Mode", kModeSelectorList, (uint32_t&)mPrecisionMode))
+        if (widget.dropdown("Mode", mPrecisionMode))
         {
             // Reset accumulation when mode changes.
             reset();
@@ -334,7 +331,7 @@ void AccumulatePass::renderUI(Gui::Widgets& widget)
             }
             widget.tooltip("Maximum number of frames to accumulate before triggering overflow. 0 means infinite accumulation.");
 
-            if (widget.dropdown("Overflow Mode", kOverflowModeList, reinterpret_cast<uint32_t&>(mOverflowMode)))
+            if (widget.dropdown("Overflow Mode", mOverflowMode))
             {
                 reset();
             }
@@ -351,7 +348,7 @@ void AccumulatePass::renderUI(Gui::Widgets& widget)
     }
 }
 
-void AccumulatePass::setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene)
+void AccumulatePass::setScene(RenderContext* pRenderContext, const ref<Scene>& pScene)
 {
     mpScene = pScene;
 
@@ -362,7 +359,8 @@ void AccumulatePass::setScene(RenderContext* pRenderContext, const Scene::Shared
 void AccumulatePass::onHotReload(HotReloadFlags reloaded)
 {
     // Reset accumulation if programs changed.
-    if (is_set(reloaded, HotReloadFlags::Program)) reset();
+    if (is_set(reloaded, HotReloadFlags::Program))
+        reset();
 }
 
 void AccumulatePass::setEnabled(bool enabled)
@@ -383,7 +381,7 @@ void AccumulatePass::prepareAccumulation(RenderContext* pRenderContext, uint32_t
 {
     // Allocate/resize/clear buffers for intermedate data. These are different depending on accumulation mode.
     // Buffers that are not used in the current mode are released.
-    auto prepareBuffer = [&](Texture::SharedPtr& pBuf, ResourceFormat format, bool bufUsed)
+    auto prepareBuffer = [&](ref<Texture>& pBuf, ResourceFormat format, bool bufUsed)
     {
         if (!bufUsed)
         {
@@ -393,19 +391,25 @@ void AccumulatePass::prepareAccumulation(RenderContext* pRenderContext, uint32_t
         // (Re-)create buffer if needed.
         if (!pBuf || pBuf->getWidth() != width || pBuf->getHeight() != height)
         {
-            pBuf = Texture::create2D(mpDevice.get(), width, height, format, 1, 1, nullptr, Resource::BindFlags::ShaderResource | Resource::BindFlags::UnorderedAccess);
+            pBuf = mpDevice->createTexture2D(
+                width, height, format, 1, 1, nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess
+            );
             FALCOR_ASSERT(pBuf);
             reset();
         }
         // Clear data if accumulation has been reset (either above or somewhere else).
         if (mFrameCount == 0)
         {
-            if (getFormatType(format) == FormatType::Float) pRenderContext->clearUAV(pBuf->getUAV().get(), float4(0.f));
-            else pRenderContext->clearUAV(pBuf->getUAV().get(), uint4(0));
+            if (getFormatType(format) == FormatType::Float)
+                pRenderContext->clearUAV(pBuf->getUAV().get(), float4(0.f));
+            else
+                pRenderContext->clearUAV(pBuf->getUAV().get(), uint4(0));
         }
     };
 
-    prepareBuffer(mpLastFrameSum, ResourceFormat::RGBA32Float, mPrecisionMode == Precision::Single || mPrecisionMode == Precision::SingleCompensated);
+    prepareBuffer(
+        mpLastFrameSum, ResourceFormat::RGBA32Float, mPrecisionMode == Precision::Single || mPrecisionMode == Precision::SingleCompensated
+    );
     prepareBuffer(mpLastFrameCorr, ResourceFormat::RGBA32Float, mPrecisionMode == Precision::SingleCompensated);
     prepareBuffer(mpLastFrameSumLo, ResourceFormat::RGBA32Uint, mPrecisionMode == Precision::Double);
     prepareBuffer(mpLastFrameSumHi, ResourceFormat::RGBA32Uint, mPrecisionMode == Precision::Double);

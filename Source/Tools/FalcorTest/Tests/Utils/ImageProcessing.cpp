@@ -27,7 +27,6 @@
  **************************************************************************/
 #include "Testing/UnitTest.h"
 #include "Utils/Image/ImageProcessing.h"
-#include "Utils/Math/Float16.h"
 
 namespace Falcor
 {
@@ -55,16 +54,16 @@ void testCopyColorChannel(
     ResourceFormat dstFormat
 )
 {
-    Device* pDevice = ctx.getDevice().get();
+    ref<Device> pDevice = ctx.getDevice();
 
     const auto srcChannels = getFormatChannelCount(srcFormat);
     const auto dstChannels = getFormatChannelCount(dstFormat);
 
     // Create test textures.
     auto data = generateTestData<T>(width * height * srcChannels);
-    auto pSrc = Texture::create2D(pDevice, width, height, srcFormat, 1, 1, data.data(), ResourceBindFlags::ShaderResource);
-    auto pDst = Texture::create2D(
-        pDevice, width, height, dstFormat, 1, 1, nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess
+    auto pSrc = pDevice->createTexture2D(width, height, srcFormat, 1, 1, data.data(), ResourceBindFlags::ShaderResource);
+    auto pDst = pDevice->createTexture2D(
+        width, height, dstFormat, 1, 1, nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess
     );
 
     // Test copying from color channel i=0..3.

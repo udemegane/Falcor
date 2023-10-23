@@ -25,9 +25,6 @@
  # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
-__exported import Rendering.Materials.LobeType;
-__exported import Utils.Sampling.SampleGeneratorInterface;
-__exported import Rendering.Materials.BxDF; // For StandardBSDFData
 #include "Utils/HostDeviceShared.slangh" // For bit packing macros
 
 __exported import Scene.ShadingData;
@@ -35,13 +32,28 @@ __exported import Scene.Material.ShadingUtils;
 __exported import Rendering.Materials.IBSDF; // For kMinCosTheta
 __exported import Rendering.Materials.LobeType;
 __exported import Utils.Sampling.SampleGeneratorInterface;
+__exported import DiffRendering.DiffMaterialData;
+import Rendering.Volumes.PhaseFunction;
+import Scene.Material.VolumeProperties;
 
 /** Hints passed in when creating a material instance.
 */
 enum MaterialInstanceHints : uint
 {
     None = 0,
+    DisableNormalMapping = 0x1,     ///< Turn off normal mapping if supported.
+    AdjustShadingNormal = 0x2,      ///< Adjust shading normal to reduce risk of back-facing hits.
 };
+
+bool isNormalMappingEnabled(uint hints)
+{
+    return !(hints & (uint)MaterialInstanceHints::DisableNormalMapping);
+}
+
+bool isAdjustShadingNormalEnabled(uint hints)
+{
+    return hints & (uint)MaterialInstanceHints::AdjustShadingNormal;
+}
 
 /** Describes a BSDF sample.
 */
@@ -139,11 +151,17 @@ interface IMaterialInstance
         \param[in,out] sg Sample generator.
         \return Returns f(wi, wo) * dot(wo, n).
     */
-    // Minimum cos(theta) for the incident and outgoing vectors.
-    // Some BSDF functions are not robust for cos(theta) == 0.0,
-    // so using a small epsilon for consistency.
-    // TODO: Move into IBSDF if possible
     float3 eval<S : ISampleGenerator>(const ShadingData sd, const float3 wo, inout S sg);
+
+    /** Evaluates the material instance with auto-diff.
+        \param[in] diffData Differentiable parameters.
+        \param[in] sd Shading data.
+        \param[in] wo Outgoing direction.
+        \param[in,out] sg Sample generator.
+        \return Returns f(wi, wo) * dot(wo, n).
+    */
+    [Differentiable]
+    float3 evalAD<S : ISampleGenerator>(const DiffMaterialData diffData, const ShadingData sd, const float3 wo, inout S sg);
 
     /** Samples the material instance.
         \param[in] sd Shading data.
@@ -174,4 +192,34 @@ interface IMaterialInstance
     */
     uint getLobeTypes(const ShadingData sd);
 
+
+    /** Indicates if the volume properties are taken from the material instance or not
+        \return True if the volume properties are textured.
+    */
+    bool hasVolumeProperties();
+
+    /** (Textured) volume properties which are stored on the surface instead of the volume
+        \return Volume properties.
+    */
+    VolumeProperties getVolumeProperties();
 }
+
+[open]
+struct MaterialInstanceBase
+{
+    bool hasVolumeProperties()
+    {
+        return false;
+    }
+
+    VolumeProperties getVolumeProperties()
+    {
+        VolumeProperties result;
+        result.sigmaA = 0.f;
+        result.sigmaS = 0.f;
+        result.phaseFunction = NullPhaseFunction();
+        return result;
+
+    }
+}
+

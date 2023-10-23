@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -30,7 +30,7 @@
 
 namespace Falcor
 {
-    std::unique_ptr<Importer> Importer::create(std::string extension, const PluginManager& pm)
+    std::unique_ptr<Importer> Importer::create(std::string_view extension, const PluginManager& pm)
     {
         for (const auto& [type, info] : pm.getInfos<Importer>())
             if (std::find(info.extensions.begin(), info.extensions.end(), extension) != info.extensions.end())
@@ -44,6 +44,11 @@ namespace Falcor
         for (const auto& [type, info] : pm.getInfos<Importer>())
             extensions.insert(extensions.end(), info.extensions.begin(), info.extensions.end());
         return extensions;
+    }
+
+    void Importer::importSceneFromMemory(const void* buffer, size_t byteSize, std::string_view extension, SceneBuilder& builder, const std::map<std::string, std::string>& materialToShortName)
+    {
+        FALCOR_THROW("Not implemented.");
     }
 
     FALCOR_SCRIPT_BINDING(Importer)

@@ -27,6 +27,8 @@
  **************************************************************************/
 #pragma once
 #include "Core/Macros.h"
+#include "Core/Enum.h"
+#include "Utils/Properties.h"
 #include "Utils/Debug/PixelDebug.h"
 #include "Scene/Scene.h"
 #include <memory>
@@ -61,7 +63,7 @@ namespace Falcor
         - When compiling shaders using this module, ensure you add the shader preprocessor
           defines provided by RTXDI::getDefines().
         - When executing shaders using this module, ensure you set the shader data
-          using RTXDI::setShaderData().
+          using RTXDI::bindShaderData().
 
         To render a frame, the following steps need to occur:
 
@@ -84,8 +86,6 @@ namespace Falcor
     class FALCOR_API RTXDI
     {
     public:
-        using SharedPtr = std::shared_ptr<RTXDI>;
-
         /** RTXDI sampling modes.
         */
         enum class Mode
@@ -96,15 +96,29 @@ namespace Falcor
             SpatiotemporalResampling    = 4, ///< Spatiotemporal resampling.
         };
 
+        FALCOR_ENUM_INFO(Mode, {
+            { Mode::NoResampling, "NoResampling" },
+            { Mode::SpatialResampling, "SpatialResampling" },
+            { Mode::TemporalResampling, "TemporalResampling" },
+            { Mode::SpatiotemporalResampling, "SpatiotemporalResampling" },
+        });
+
         /** Bias correction modes.
         */
         enum class BiasCorrection
         {
             Off         = 0, ///< Use (1/M) normalization, which is very biased but also very fast.
             Basic       = 1, ///< Use MIS-like normalization but assume that every sample is visible.
-            Pairwise    = 2, ///< Use pairwise MIS normalization.  Assumes every sample is visible.
+            Pairwise    = 2, ///< Use pairwise MIS normalization. Assumes every sample is visible.
             RayTraced   = 3, ///< Use MIS-like normalization with visibility rays. Unbiased.
         };
+
+        FALCOR_ENUM_INFO(BiasCorrection, {
+            { BiasCorrection::Off, "Off" },
+            { BiasCorrection::Basic, "Basic" },
+            { BiasCorrection::Pairwise, "Pairwise" },
+            { BiasCorrection::RayTraced, "RayTraced" },
+        });
 
         /** Configuration options, with generally reasonable defaults.
         */
@@ -157,6 +171,41 @@ namespace Falcor
 
             // Note: Empty constructor needed for clang due to the use of the nested struct constructor in the parent constructor.
             Options() {}
+
+            template<typename Archive>
+            void serialize(Archive& ar)
+            {
+                ar("mode", mode);
+
+                ar("presampledTileCount", presampledTileCount);
+                ar("presampledTileSize", presampledTileSize);
+                ar("storeCompactLightInfo", storeCompactLightInfo);
+
+                ar("localLightCandidateCount", localLightCandidateCount);
+                ar("infiniteLightCandidateCount", infiniteLightCandidateCount);
+                ar("envLightCandidateCount", envLightCandidateCount);
+                ar("brdfCandidateCount", brdfCandidateCount);
+                ar("brdfCutoff", brdfCutoff);
+                ar("testCandidateVisibility", testCandidateVisibility);
+
+                ar("biasCorrection", biasCorrection);
+                ar("depthThreshold", depthThreshold);
+                ar("normalThreshold", normalThreshold);
+
+                ar("samplingRadius", samplingRadius);
+                ar("spatialSampleCount", spatialSampleCount);
+                ar("spatialIterations", spatialIterations);
+
+                ar("maxHistoryLength", maxHistoryLength);
+                ar("boilingFilterStrength", boilingFilterStrength);
+
+                ar("rayEpsilon", rayEpsilon);
+
+                ar("useEmissiveTextures", useEmissiveTextures);
+
+                ar("enableVisibilityShortcut", enableVisibilityShortcut);
+                ar("enablePermutationSampling", enablePermutationSampling);
+            }
         };
 
         static_assert(std::is_trivially_copyable<Options>() , "Options needs to be trivially copyable");
@@ -166,12 +215,11 @@ namespace Falcor
         */
         static bool isInstalled() { return (bool)FALCOR_HAS_RTXDI; }
 
-        /** Create a new instance of the RTXDI sampler.
+        /** Constructor.
             \param[in] pScene Scene.
             \param[in] options Configuration options.
-            \return A new instance.
         */
-        static SharedPtr create(const Scene::SharedPtr& pScene, const Options& options = Options());
+        RTXDI(const ref<Scene>& pScene, const Options& options = Options());
 
         /** Set the configuration options.
             \param[in] options Configuration options.
@@ -191,13 +239,13 @@ namespace Falcor
         /** Get a list of shader defines for using the RTXDI sampler.
             \return List of shader defines.
         */
-        Program::DefineList getDefines() const;
+        DefineList getDefines() const;
 
         /** Bind the RTXDI sampler to a given shader var.
             Note: RTXDI is always bound to the global "gRTXDI" variable, so we expect a root shader variable here.
             \param[in] rootVar The root shader variable to set the data into.
         */
-        void setShaderData(const ShaderVar& rootVar);
+        void bindShaderData(const ShaderVar& rootVar);
 
         /** Begin a frame.
             Must be called once at the beginning of each frame.
@@ -217,21 +265,19 @@ namespace Falcor
             \param[in] pRenderContext Render context.
             \param[in] pMotionVectors Motion vectors for temporal reprojection.
         */
-        void update(RenderContext* pRenderContext, const Texture::SharedPtr& pMotionVectors);
+        void update(RenderContext* pRenderContext, const ref<Texture>& pMotionVectors);
 
         /** Get the pixel debug component.
             \return Returns the pixel debug component.
         */
-        const PixelDebug::SharedPtr& getPixelDebug() const { return mpPixelDebug; }
+        PixelDebug& getPixelDebug() { return *mpPixelDebug; }
 
     private:
-        RTXDI(const Scene::SharedPtr& pScene, const Options& options);
-
-        Scene::SharedPtr                    mpScene;                ///< Scene (set on initialization).
-        std::shared_ptr<Device>             mpDevice;               ///< GPU device.
+        ref<Scene>                          mpScene;                ///< Scene (set on initialization).
+        ref<Device>                         mpDevice;               ///< GPU device.
         Options                             mOptions;               ///< Configuration options.
 
-        PixelDebug::SharedPtr               mpPixelDebug;           ///< Pixel debug component.
+        std::unique_ptr<PixelDebug>         mpPixelDebug;           ///< Pixel debug component.
 
         // If the SDK is not installed, we leave out most of the implementation.
 
@@ -293,51 +339,51 @@ namespace Falcor
 
         // Resources.
 
-        Buffer::SharedPtr       mpAnalyticLightIDBuffer;            ///< Buffer storing a list of analytic light IDs used in the scene.
-        Buffer::SharedPtr       mpLightInfoBuffer;                  ///< Buffer storing information about all the lights in the scene.
-        Texture::SharedPtr      mpLocalLightPdfTexture;             ///< Texture storing the PDF for sampling local lights proportional to radiant flux.
-        Texture::SharedPtr      mpEnvLightLuminanceTexture;         ///< Texture storing luminance of the environment light.
-        Texture::SharedPtr      mpEnvLightPdfTexture;               ///< Texture storing the PDF for sampling the environment light proportional to luminance (times solid angle).
+        ref<Buffer>       mpAnalyticLightIDBuffer;                  ///< Buffer storing a list of analytic light IDs used in the scene.
+        ref<Buffer>       mpLightInfoBuffer;                        ///< Buffer storing information about all the lights in the scene.
+        ref<Texture>      mpLocalLightPdfTexture;                   ///< Texture storing the PDF for sampling local lights proportional to radiant flux.
+        ref<Texture>      mpEnvLightLuminanceTexture;               ///< Texture storing luminance of the environment light.
+        ref<Texture>      mpEnvLightPdfTexture;                     ///< Texture storing the PDF for sampling the environment light proportional to luminance (times solid angle).
 
-        Buffer::SharedPtr       mpLightTileBuffer;                  ///< Buffer storing precomputed light tiles (see presampleLights()). This is called "ris buffer" in RTXDI.
-        Buffer::SharedPtr       mpCompactLightInfoBuffer;           ///< Optional buffer storing compact light info for samples in the light tile buffer for improved coherence.
+        ref<Buffer>       mpLightTileBuffer;                        ///< Buffer storing precomputed light tiles (see presampleLights()). This is called "ris buffer" in RTXDI.
+        ref<Buffer>       mpCompactLightInfoBuffer;                 ///< Optional buffer storing compact light info for samples in the light tile buffer for improved coherence.
 
-        Buffer::SharedPtr       mpReservoirBuffer;                  ///< Buffer storing light reservoirs between kernels (and between frames)
-        Buffer::SharedPtr       mpSurfaceDataBuffer;                ///< Buffer storing the surface data for the current and previous frames.
-        Buffer::SharedPtr       mpNeighborOffsetsBuffer;            ///< Buffer storing a poisson(-ish) distribution of offsets for sampling randomized neighbors.
+        ref<Buffer>       mpReservoirBuffer;                        ///< Buffer storing light reservoirs between kernels (and between frames)
+        ref<Buffer>       mpSurfaceDataBuffer;                      ///< Buffer storing the surface data for the current and previous frames.
+        ref<Buffer>       mpNeighborOffsetsBuffer;                  ///< Buffer storing a poisson(-ish) distribution of offsets for sampling randomized neighbors.
 
         // Compute passes.
 
         // Passes to pipe data from Falcor into RTXDI.
 
-        ComputePass::SharedPtr  mpReflectTypes;                     ///< Helper pass for reflecting type information.
-        ComputePass::SharedPtr  mpUpdateLightsPass;                 ///< Update the light infos and light PDF texture.
-        ComputePass::SharedPtr  mpUpdateEnvLightPass;               ///< Update the environment light luminance and PDF texture.
+        ref<ComputePass>  mpReflectTypes;                           ///< Helper pass for reflecting type information.
+        ref<ComputePass>  mpUpdateLightsPass;                       ///< Update the light infos and light PDF texture.
+        ref<ComputePass>  mpUpdateEnvLightPass;                     ///< Update the environment light luminance and PDF texture.
 
         // Passes for all RTXDI modes.
 
-        ComputePass::SharedPtr  mpPresampleLocalLightsPass;         ///< Presample local lights into light tiles.
-        ComputePass::SharedPtr  mpPresampleEnvLightPass;            ///< Presample the environment light into light tiles.
-        ComputePass::SharedPtr  mpGenerateCandidatesPass;           ///< Generate initial candidates.
-        ComputePass::SharedPtr  mpTestCandidateVisibilityPass;      ///< Test visibility for selected candidate.
+        ref<ComputePass>  mpPresampleLocalLightsPass;               ///< Presample local lights into light tiles.
+        ref<ComputePass>  mpPresampleEnvLightPass;                  ///< Presample the environment light into light tiles.
+        ref<ComputePass>  mpGenerateCandidatesPass;                 ///< Generate initial candidates.
+        ref<ComputePass>  mpTestCandidateVisibilityPass;            ///< Test visibility for selected candidate.
 
         // Passes for various types of reuse.
 
-        ComputePass::SharedPtr  mpSpatialResamplingPass;            ///< Spatial only resampling.
-        ComputePass::SharedPtr  mpTemporalResamplingPass;           ///< Temporal only resampling.
-        ComputePass::SharedPtr  mpSpatiotemporalResamplingPass;     ///< Spatiotemporal resampling.
+        ref<ComputePass>  mpSpatialResamplingPass;                  ///< Spatial only resampling.
+        ref<ComputePass>  mpTemporalResamplingPass;                 ///< Temporal only resampling.
+        ref<ComputePass>  mpSpatiotemporalResamplingPass;           ///< Spatiotemporal resampling.
 
         // Compute pass launches.
 
-        void setShaderDataInternal(const ShaderVar& rootVar, const Texture::SharedPtr& pMotionVectors);
+        void bindShaderDataInternal(const ShaderVar& rootVar, const ref<Texture>& pMotionVectors, bool bindScene = true);
         void updateLights(RenderContext* pRenderContext);
         void updateEnvLight(RenderContext* pRenderContext);
         void presampleLights(RenderContext* pRenderContext);
         void generateCandidates(RenderContext* pRenderContext, uint32_t outputReservoirID);
         void testCandidateVisibility(RenderContext* pRenderContext, uint32_t candidateReservoirID);
         uint32_t spatialResampling(RenderContext* pRenderContext, uint32_t inputReservoirID);
-        uint32_t temporalResampling(RenderContext* pRenderContext, const Texture::SharedPtr& pMotionVectors, uint32_t candidateReservoirID, uint32_t lastFrameReservoirID);
-        uint32_t spatiotemporalResampling(RenderContext* pRenderContext, const Texture::SharedPtr& pMotionVectors, uint32_t candidateReservoirID, uint32_t lastFrameReservoirID);
+        uint32_t temporalResampling(RenderContext* pRenderContext, const ref<Texture>& pMotionVectors, uint32_t candidateReservoirID, uint32_t lastFrameReservoirID);
+        uint32_t spatiotemporalResampling(RenderContext* pRenderContext, const ref<Texture>& pMotionVectors, uint32_t candidateReservoirID, uint32_t lastFrameReservoirID);
 
         // Internal routines.
 
@@ -347,4 +393,7 @@ namespace Falcor
 
 #endif // FALCOR_HAS_RTXDI
     };
+
+    FALCOR_ENUM_REGISTER(RTXDI::Mode);
+    FALCOR_ENUM_REGISTER(RTXDI::BiasCorrection);
 }

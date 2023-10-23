@@ -39,28 +39,28 @@ class FullScreenPass;
 
 struct BlitContext
 {
-    std::shared_ptr<FullScreenPass> pPass;
-    Fbo::SharedPtr pFbo;
+    ref<FullScreenPass> pPass;
+    ref<Fbo> pFbo;
 
-    Sampler::SharedPtr pLinearSampler;
-    Sampler::SharedPtr pPointSampler;
-    Sampler::SharedPtr pLinearMinSampler;
-    Sampler::SharedPtr pPointMinSampler;
-    Sampler::SharedPtr pLinearMaxSampler;
-    Sampler::SharedPtr pPointMaxSampler;
+    ref<Sampler> pLinearSampler;
+    ref<Sampler> pPointSampler;
+    ref<Sampler> pLinearMinSampler;
+    ref<Sampler> pPointMinSampler;
+    ref<Sampler> pLinearMaxSampler;
+    ref<Sampler> pPointMaxSampler;
 
-    ParameterBlock::SharedPtr pBlitParamsBuffer;
+    ref<ParameterBlock> pBlitParamsBuffer;
     float2 prevSrcRectOffset = float2(0, 0);
     float2 prevSrcReftScale = float2(0, 0);
 
     // Variable offsets in constant buffer
-    UniformShaderVarOffset offsetVarOffset;
-    UniformShaderVarOffset scaleVarOffset;
+    TypedShaderVarOffset offsetVarOffset;
+    TypedShaderVarOffset scaleVarOffset;
     ProgramReflection::BindLocation texBindLoc;
 
     // Parameters for complex blit
     float4 prevComponentsTransform[4] = {float4(0), float4(0), float4(0), float4(0)};
-    UniformShaderVarOffset compTransVarOffset[4];
+    TypedShaderVarOffset compTransVarOffset[4];
 
     BlitContext(Device* pDevice);
 };

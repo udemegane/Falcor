@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -30,6 +30,9 @@
 #include "Utils/PathResolving.h"
 
 #include "Utils/Scripting/ScriptBindings.h"
+
+#include <pybind11/pybind11.h>
+#include <pybind11_json/pybind11_json.hpp>
 
 #include <fstream>
 
@@ -62,6 +65,28 @@ std::vector<std::string> toStrings(const nlohmann::json& value)
 
 } // namespace
 
+Settings& Settings::getGlobalSettings()
+{
+    static Settings globalSettings = []()
+    {
+        Settings settings;
+        // Load settings from runtime directory first.
+        settings.addOptions(getRuntimeDirectory() / "settings.json");
+        // Override with user settings.
+        if (!getHomeDirectory().empty())
+            settings.addOptions(getHomeDirectory() / ".falcor" / "settings.json");
+        return settings;
+    }();
+    return globalSettings;
+}
+
+void Settings::addOptions(const pybind11::dict& options)
+{
+    auto json = pyjson::to_json(options);
+    merge(getActive().mOptions, json);
+    updateSearchPaths(json);
+}
+
 bool Settings::addOptions(const std::filesystem::path& path)
 {
     if (path.extension() == ".json")
@@ -82,6 +107,16 @@ bool Settings::addOptionsJSON(const std::filesystem::path& path)
     return true;
 }
 
+void Settings::addFilteredAttributes(const pybind11::dict& attributes)
+{
+    merge(getActive().mFilteredAttributes, pyjson::to_json(attributes));
+}
+
+void Settings::clearFilteredAttributes()
+{
+    getActive().mFilteredAttributes.clear();
+}
+
 void Settings::updateSearchPaths(const nlohmann::json& update)
 {
     if (update.is_null() || !update.is_object())
@@ -95,10 +130,13 @@ void Settings::updateSearchPaths(const nlohmann::json& update)
 
             if (searchKind == "standardsearchpath")
             {
-                std::vector<std::filesystem::path>& current = mStandardSearchDirectories[std::string(category)].get();
+                std::vector<std::filesystem::path>& current = mStandardSearchDirectories[std::string(category)];
                 ResolvedPaths result = resolveSearchPaths(current, pathUpdates, std::vector<std::filesystem::path>());
-                FALCOR_CHECK_ARG_MSG(
-                    result.invalid.empty(), "While processing {}:{}, found invalid paths: {}", searchKind, category,
+                FALCOR_CHECK(
+                    result.invalid.empty(),
+                    "While processing {}:{}, found invalid paths: {}",
+                    searchKind,
+                    category,
                     joinStrings(result.invalid, ", ")
                 );
                 current = std::move(result.resolved);
@@ -107,16 +145,19 @@ void Settings::updateSearchPaths(const nlohmann::json& update)
 
             if (searchKind == "searchpath")
             {
-                std::vector<std::filesystem::path>& current = mSearchDirectories[std::string(category)].get();
+                std::vector<std::filesystem::path>& current = mSearchDirectories[std::string(category)];
                 auto it = mStandardSearchDirectories.find(std::string(category));
 
                 ResolvedPaths result;
                 if (it == mStandardSearchDirectories.end())
                     result = resolveSearchPaths(current, pathUpdates, std::vector<std::filesystem::path>());
                 else
-                    result = resolveSearchPaths(current, pathUpdates, it->second.get());
-                FALCOR_CHECK_ARG_MSG(
-                    result.invalid.empty(), "While processing {}:{}, found invalid paths: {}", searchKind, category,
+                    result = resolveSearchPaths(current, pathUpdates, it->second);
+                FALCOR_CHECK(
+                    result.invalid.empty(),
+                    "While processing {}:{}, found invalid paths: {}",
+                    searchKind,
+                    category,
                     joinStrings(result.invalid, ", ")
                 );
                 current = std::move(result.resolved);

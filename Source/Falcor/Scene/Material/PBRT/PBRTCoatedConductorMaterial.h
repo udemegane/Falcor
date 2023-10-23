@@ -57,16 +57,14 @@ namespace Falcor
     */
     class FALCOR_API PBRTCoatedConductorMaterial : public BasicMaterial
     {
+        FALCOR_OBJECT(PBRTCoatedConductorMaterial)
     public:
-        using SharedPtr = std::shared_ptr<PBRTCoatedConductorMaterial>;
+        static ref<PBRTCoatedConductorMaterial> create(ref<Device> pDevice, const std::string& name) { return make_ref<PBRTCoatedConductorMaterial>(pDevice, name); }
 
-        /** Create a new PBRTCoatedConductor material.
-            \param[in] name The material name.
-        */
-        static SharedPtr create(std::shared_ptr<Device> pDevice, const std::string& name = "");
+        PBRTCoatedConductorMaterial(ref<Device> pDevice, const std::string& name);
 
-        Program::ShaderModuleList getShaderModules() const override;
-        Program::TypeConformanceList getTypeConformances() const override;
+        ProgramDesc::ShaderModuleList getShaderModules() const override;
+        TypeConformanceList getTypeConformances() const override;
 
         /** Set the roughness.
         */
@@ -77,8 +75,6 @@ namespace Falcor
         float4 getRoughness() const { return float4(mData.specular[0], mData.specular[1], mData.specular[2], mData.specular[3]); }
 
     protected:
-        PBRTCoatedConductorMaterial(std::shared_ptr<Device> pDevice, const std::string& name);
-
         void renderSpecularUI(Gui::Widgets& widget) override;
     };
 }

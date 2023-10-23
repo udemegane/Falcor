@@ -64,6 +64,8 @@ gfx::Format getGFXFormat(ResourceFormat format)
         return gfx::Format::BC7_UNORM;
     case ResourceFormat::BC7UnormSrgb:
         return gfx::Format::BC7_UNORM_SRGB;
+    case ResourceFormat::BGRA4Unorm:
+        return gfx::Format::B4G4R4A4_UNORM;
     case ResourceFormat::BGRA8Unorm:
         return gfx::Format::B8G8R8A8_UNORM;
     case ResourceFormat::BGRA8UnormSrgb:
@@ -76,6 +78,8 @@ gfx::Format getGFXFormat(ResourceFormat format)
         return gfx::Format::D16_UNORM;
     case ResourceFormat::D32Float:
         return gfx::Format::D32_FLOAT;
+    case ResourceFormat::D32FloatS8Uint:
+        return gfx::Format::D32_FLOAT_S8_UINT;
     case ResourceFormat::R11G11B10Float:
         return gfx::Format::R11G11B10_FLOAT;
     case ResourceFormat::R16Float:
@@ -150,6 +154,8 @@ gfx::Format getGFXFormat(ResourceFormat format)
         return gfx::Format::R16G16B16A16_UINT;
     case ResourceFormat::RGBA16Unorm:
         return gfx::Format::R16G16B16A16_UNORM;
+    case ResourceFormat::RGBA16Snorm:
+        return gfx::Format::R16G16B16A16_SNORM;
     case ResourceFormat::RGBA32Float:
         return gfx::Format::R32G32B32A32_FLOAT;
     case ResourceFormat::RGBA32Int:
@@ -225,51 +231,51 @@ gfx::ResourceState getGFXResourceState(Resource::State state)
     }
 }
 
-void getGFXResourceState(Resource::BindFlags flags, gfx::ResourceState& defaultState, gfx::ResourceStateSet& allowedStates)
+void getGFXResourceState(ResourceBindFlags flags, gfx::ResourceState& defaultState, gfx::ResourceStateSet& allowedStates)
 {
     defaultState = gfx::ResourceState::General;
     allowedStates = gfx::ResourceStateSet(defaultState);
 
     // setting up the following flags requires Slang gfx resourece states to have integral type
-    if (is_set(flags, Resource::BindFlags::UnorderedAccess))
+    if (is_set(flags, ResourceBindFlags::UnorderedAccess))
     {
         allowedStates.add(gfx::ResourceState::UnorderedAccess);
     }
 
-    if (is_set(flags, Resource::BindFlags::ShaderResource))
+    if (is_set(flags, ResourceBindFlags::ShaderResource))
     {
         allowedStates.add(gfx::ResourceState::ShaderResource);
     }
 
-    if (is_set(flags, Resource::BindFlags::RenderTarget))
+    if (is_set(flags, ResourceBindFlags::RenderTarget))
     {
         allowedStates.add(gfx::ResourceState::RenderTarget);
     }
 
-    if (is_set(flags, Resource::BindFlags::DepthStencil))
+    if (is_set(flags, ResourceBindFlags::DepthStencil))
     {
         allowedStates.add(gfx::ResourceState::DepthWrite);
     }
 
-    if (is_set(flags, Resource::BindFlags::Vertex))
+    if (is_set(flags, ResourceBindFlags::Vertex))
     {
         allowedStates.add(gfx::ResourceState::VertexBuffer);
         allowedStates.add(gfx::ResourceState::AccelerationStructureBuildInput);
     }
-    if (is_set(flags, Resource::BindFlags::Index))
+    if (is_set(flags, ResourceBindFlags::Index))
     {
         allowedStates.add(gfx::ResourceState::IndexBuffer);
         allowedStates.add(gfx::ResourceState::AccelerationStructureBuildInput);
     }
-    if (is_set(flags, Resource::BindFlags::IndirectArg))
+    if (is_set(flags, ResourceBindFlags::IndirectArg))
     {
         allowedStates.add(gfx::ResourceState::IndirectArgument);
     }
-    if (is_set(flags, Resource::BindFlags::Constant))
+    if (is_set(flags, ResourceBindFlags::Constant))
     {
         allowedStates.add(gfx::ResourceState::ConstantBuffer);
     }
-    if (is_set(flags, Resource::BindFlags::AccelerationStructure))
+    if (is_set(flags, ResourceBindFlags::AccelerationStructure))
     {
         allowedStates.add(gfx::ResourceState::AccelerationStructure);
         allowedStates.add(gfx::ResourceState::ShaderResource);

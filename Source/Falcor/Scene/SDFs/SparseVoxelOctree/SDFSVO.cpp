@@ -29,12 +29,12 @@
 #include "Core/API/Device.h"
 #include "Core/API/RenderContext.h"
 #include "Utils/Math/MathHelpers.h"
+#include "Utils/Math/MathConstants.slangh"
+#include "Utils/SharedCache.h"
 #include "Scene/SDFs/SDFVoxelTypes.slang"
 
 namespace Falcor
 {
-    Buffer::SharedPtr SDFSVO::spSDFSVOGridUnitAABBBuffer; // TODO: REMOVEGLOBAL
-
     namespace
     {
         const std::string kSDFCountSurfaceVoxelsShaderName = "Scene/SDFs/SDFSurfaceVoxelCounter.cs.slang";
@@ -57,24 +57,32 @@ namespace Falcor
         }
     }
 
-    SDFSVO::SharedPtr SDFSVO::create(std::shared_ptr<Device> pDevice)
+    struct SDFSVO::SharedData
     {
-#if !FALCOR_NVAPI_AVAILABLE
-        throw RuntimeError("SDFSVO requires NVAPI. See installation instructions in README.");
-#endif
+        ref<Buffer> pUnitAABBBuffer;
 
-        if (!spSDFSVOGridUnitAABBBuffer)
+        SharedData(ref<Device> pDevice)
         {
             RtAABB unitAABB { float3(-0.5f), float3(0.5f) };
-            spSDFSVOGridUnitAABBBuffer = Buffer::create(pDevice.get(), sizeof(RtAABB), Resource::BindFlags::ShaderResource, Buffer::CpuAccess::None, &unitAABB);
+            pUnitAABBBuffer = pDevice->createBuffer(sizeof(RtAABB), ResourceBindFlags::ShaderResource, MemoryType::DeviceLocal, &unitAABB);
         }
+    };
 
-        return SharedPtr(new SDFSVO(std::move(pDevice)));
+    static SharedCache<SDFSVO::SharedData, Device*> sSharedCache;
+
+    SDFSVO::SDFSVO(ref<Device> pDevice)
+        : SDFGrid(pDevice)
+    {
+#if !FALCOR_NVAPI_AVAILABLE
+        FALCOR_THROW("SDFSVO requires NVAPI. See installation instructions in README.");
+#endif
+
+        mpSharedData = sSharedCache.acquire(mpDevice.get(), [this]() { return std::make_shared<SharedData>(mpDevice); });
     }
 
     size_t SDFSVO::getSize() const
     {
-        return (spSDFSVOGridUnitAABBBuffer ? spSDFSVOGridUnitAABBBuffer->getSize() : 0) + (mpSVOBuffer ? mpSVOBuffer->getSize() : 0);
+        return mpSharedData->pUnitAABBBuffer->getSize() + (mpSVOBuffer ? mpSVOBuffer->getSize() : 0);
     }
 
     uint32_t SDFSVO::getMaxPrimitiveIDBits() const
@@ -86,7 +94,7 @@ namespace Falcor
     {
         if (!mPrimitives.empty())
         {
-            throw RuntimeError("An SDFSVO instance cannot be created from primitives!");
+            FALCOR_THROW("An SDFSVO instance cannot be created from primitives!");
         }
 
         // Create source grid texture to read from.
@@ -96,23 +104,23 @@ namespace Falcor
         }
         else
         {
-            mpSDFGridTexture = Texture::create3D(mpDevice.get(), mGridWidth + 1, mGridWidth + 1, mGridWidth + 1, ResourceFormat::R8Snorm, 1, mValues.data());
+            mpSDFGridTexture = mpDevice->createTexture3D(mGridWidth + 1, mGridWidth + 1, mGridWidth + 1, ResourceFormat::R8Snorm, 1, mValues.data());
         }
 
         if (!mpCountSurfaceVoxelsPass)
         {
-            Program::Desc desc;
-            desc.addShaderLibrary(kSDFCountSurfaceVoxelsShaderName).csEntry("main").setShaderModel("6_5");
+            ProgramDesc desc;
+            desc.addShaderLibrary(kSDFCountSurfaceVoxelsShaderName).csEntry("main");
             mpCountSurfaceVoxelsPass = ComputePass::create(mpDevice, desc);
         }
 
         if (!mpSurfaceVoxelCounter)
         {
-            mpReadbackFence = GpuFence::create(mpDevice.get());
+            mpReadbackFence = mpDevice->createFence();
 
             static const uint32_t zero = 0;
-            mpSurfaceVoxelCounter = Buffer::create(mpDevice.get(), sizeof(uint32_t), Resource::BindFlags::UnorderedAccess, Buffer::CpuAccess::None, &zero);
-            mpSurfaceVoxelCounterStagingBuffer = Buffer::create(mpDevice.get(), sizeof(uint32_t), Resource::BindFlags::None, Buffer::CpuAccess::Read);
+            mpSurfaceVoxelCounter = mpDevice->createBuffer(sizeof(uint32_t), ResourceBindFlags::UnorderedAccess, MemoryType::DeviceLocal, &zero);
+            mpSurfaceVoxelCounterStagingBuffer = mpDevice->createBuffer(sizeof(uint32_t), ResourceBindFlags::None, MemoryType::ReadBack);
         }
         else
         {
@@ -123,18 +131,19 @@ namespace Falcor
 
         // Count the number of surface containing voxels in the texture.
         {
-            mpCountSurfaceVoxelsPass["CB"]["gGridWidth"] = mGridWidth;
-            mpCountSurfaceVoxelsPass["gSDFGrid"] = mpSDFGridTexture;
-            mpCountSurfaceVoxelsPass["gTotalVoxelCount"] = mpSurfaceVoxelCounter;
+            auto var = mpCountSurfaceVoxelsPass->getRootVar();
+            var["CB"]["gGridWidth"] = mGridWidth;
+            var["gSDFGrid"] = mpSDFGridTexture;
+            var["gTotalVoxelCount"] = mpSurfaceVoxelCounter;
             mpCountSurfaceVoxelsPass->execute(pRenderContext, mGridWidth, mGridWidth, mGridWidth);
 
             // Copy surface containing voxels count to staging buffer.
             pRenderContext->copyResource(mpSurfaceVoxelCounterStagingBuffer.get(), mpSurfaceVoxelCounter.get());
-            pRenderContext->flush(false);
-            mpReadbackFence->gpuSignal(pRenderContext->getLowLevelData()->getCommandQueue());
+            pRenderContext->submit(false);
+            pRenderContext->signal(mpReadbackFence.get());
 
             // Copy surface containing voxels count from staging buffer to CPU.
-            mpReadbackFence->syncCpu();
+            mpReadbackFence->wait();
             const uint32_t* pSurfaceContainingVoxels = reinterpret_cast<const uint32_t*>(mpSurfaceVoxelCounterStagingBuffer->map(Buffer::MapType::Read));
             std::memcpy(&finestLevelVoxelCount, pSurfaceContainingVoxels, sizeof(uint32_t));
             mpSurfaceVoxelCounterStagingBuffer->unmap();
@@ -147,7 +156,7 @@ namespace Falcor
         {
             uint32_t levelWidth = 1 << l;
             uint32_t levelVoxelMax = levelWidth * levelWidth * levelWidth;
-            worstCaseTotalVoxels += glm::min(finestLevelVoxelCount, levelVoxelMax);
+            worstCaseTotalVoxels += std::min(finestLevelVoxelCount, levelVoxelMax);
         }
 
         // Create the hash table that will store all voxels during the building process.
@@ -155,8 +164,8 @@ namespace Falcor
         if (hashTableCapacity < worstCaseTotalVoxels)
         {
             hashTableCapacity = ceilPow2(worstCaseTotalVoxels);
-            mpHashTableBuffer = Buffer::create(mpDevice.get(), hashTableCapacity * sizeof(SDFSVOHashTableVoxel));
-            mpLocationCodesBuffer = Buffer::create(mpDevice.get(), hashTableCapacity * sizeof(uint64_t));
+            mpHashTableBuffer = mpDevice->createBuffer(hashTableCapacity * sizeof(SDFSVOHashTableVoxel));
+            mpLocationCodesBuffer = mpDevice->createBuffer(hashTableCapacity * sizeof(uint64_t));
         }
         else
         {
@@ -167,20 +176,21 @@ namespace Falcor
         // Create the building pass for the bottom level.
         if (!mpBuildFinestLevelFromDistanceTexturePass)
         {
-            Program::Desc desc;
-            desc.addShaderLibrary(kSDFSVOBuildLevelFromTextureShaderName).csEntry("main").setShaderModel("6_5");
-            mpBuildFinestLevelFromDistanceTexturePass = ComputePass::create(mpDevice, desc, Program::DefineList({ {"FINEST_LEVEL_PASS", "1"} }));
+            ProgramDesc desc;
+            desc.addShaderLibrary(kSDFSVOBuildLevelFromTextureShaderName).csEntry("main");
+            mpBuildFinestLevelFromDistanceTexturePass = ComputePass::create(mpDevice, desc, DefineList({ {"FINEST_LEVEL_PASS", "1"} }));
         }
 
         // Create voxels for the bottom level.
         {
-            auto cbVar = mpBuildFinestLevelFromDistanceTexturePass["CB"];
+            auto rootVar = mpBuildFinestLevelFromDistanceTexturePass->getRootVar();
+            auto cbVar = rootVar["CB"];
             cbVar["gLevel"] = (mLevelCount - 1);
             cbVar["gNumLevels"] = mLevelCount;
             cbVar["gLevelWidth"] = mGridWidth;
-            mpBuildFinestLevelFromDistanceTexturePass["gSDFGrid"] = mpSDFGridTexture;
-            mpBuildFinestLevelFromDistanceTexturePass["gLocationCodes"] = mpLocationCodesBuffer;
-            auto hashTableVar = mpBuildFinestLevelFromDistanceTexturePass["gVoxelHashTable"];
+            rootVar["gSDFGrid"] = mpSDFGridTexture;
+            rootVar["gLocationCodes"] = mpLocationCodesBuffer;
+            auto hashTableVar = rootVar["gVoxelHashTable"];
             hashTableVar["buffer"] = mpHashTableBuffer;
             hashTableVar["capacity"] = hashTableCapacity;
             mpBuildFinestLevelFromDistanceTexturePass->execute(pRenderContext, mGridWidth, mGridWidth, mGridWidth);
@@ -189,36 +199,37 @@ namespace Falcor
         // Create the building pass for the other levels.
         if (!mpBuildLevelFromDistanceTexturePass)
         {
-            Program::Desc desc;
-            desc.addShaderLibrary(kSDFSVOBuildLevelFromTextureShaderName).csEntry("main").setShaderModel("6_5");
-            mpBuildLevelFromDistanceTexturePass = ComputePass::create(mpDevice, desc, Program::DefineList({ {"FINEST_LEVEL_PASS", "0"} }));
+            ProgramDesc desc;
+            desc.addShaderLibrary(kSDFSVOBuildLevelFromTextureShaderName).csEntry("main");
+            mpBuildLevelFromDistanceTexturePass = ComputePass::create(mpDevice, desc, DefineList({ {"FINEST_LEVEL_PASS", "0"} }));
         }
 
         // Allocate a buffer that will hold the voxel count for each level except the bottom level (as we already obtained that previously).
         std::vector<uint32_t> voxelCountsPerLevel(mLevelCount, 0);
         voxelCountsPerLevel.back() = finestLevelVoxelCount;
         {
-            mpVoxelCountPerLevelBuffer = Buffer::create(mpDevice.get(), sizeof(uint32_t) * (mLevelCount - 1), Resource::BindFlags::ShaderResource | Resource::BindFlags::UnorderedAccess, Buffer::CpuAccess::None, voxelCountsPerLevel.data());
-            mpVoxelCountPerLevelStagingBuffer = Buffer::create(mpDevice.get(), sizeof(uint32_t) * (mLevelCount - 1), Resource::BindFlags::None, Buffer::CpuAccess::Read);
+            mpVoxelCountPerLevelBuffer = mpDevice->createBuffer(sizeof(uint32_t) * (mLevelCount - 1), ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, MemoryType::DeviceLocal, voxelCountsPerLevel.data());
+            mpVoxelCountPerLevelStagingBuffer = mpDevice->createBuffer(sizeof(uint32_t) * (mLevelCount - 1), ResourceBindFlags::None, MemoryType::ReadBack);
         }
 
         // Create voxels for all the other levels, a voxel is only created if a child voxel has been created for that voxel.
         {
             // Set common shader vars.
-            auto cbVar = mpBuildLevelFromDistanceTexturePass["CB"];
+            auto rootVar = mpBuildLevelFromDistanceTexturePass->getRootVar();
+            auto cbVar = rootVar["CB"];
             cbVar["gNumLevels"] = mLevelCount;
-            mpBuildLevelFromDistanceTexturePass["gSDFGrid"] = mpSDFGridTexture;
-            mpBuildLevelFromDistanceTexturePass["gLocationCodes"] = mpLocationCodesBuffer;
-            auto hashTableVar = mpBuildLevelFromDistanceTexturePass["gVoxelHashTable"];
+            rootVar["gSDFGrid"] = mpSDFGridTexture;
+            rootVar["gLocationCodes"] = mpLocationCodesBuffer;
+            auto hashTableVar = rootVar["gVoxelHashTable"];
             hashTableVar["buffer"] = mpHashTableBuffer;
             hashTableVar["capacity"] = hashTableCapacity;
-            mpBuildLevelFromDistanceTexturePass["gVoxelCounts"] = mpVoxelCountPerLevelBuffer;
+            rootVar["gVoxelCounts"] = mpVoxelCountPerLevelBuffer;
 
             for (int32_t l = mLevelCount - 2; l >= 0; l--)
             {
                 uint32_t levelWidth = 1 << l;
 
-                cbVar["gLevel"] = l;
+                cbVar["gLevel"] = (uint32_t)l;
                 cbVar["gLevelWidth"] = levelWidth;
                 mpBuildLevelFromDistanceTexturePass->execute(pRenderContext, levelWidth, levelWidth, levelWidth);
             }
@@ -226,8 +237,8 @@ namespace Falcor
 
         // Copy child count to staging buffer.
         pRenderContext->copyResource(mpVoxelCountPerLevelStagingBuffer.get(), mpVoxelCountPerLevelBuffer.get());
-        pRenderContext->flush(false);
-        mpReadbackFence->gpuSignal(pRenderContext->getLowLevelData()->getCommandQueue());
+        pRenderContext->submit(false);
+        pRenderContext->signal(mpReadbackFence.get());
 
         // Sort the location codes.
         {
@@ -237,11 +248,11 @@ namespace Falcor
             const uint32_t kSDFSVOLocationCodeBigFlip = 2;
             const uint32_t kSDFSVOLocationCodeBigDisperse = 3;
 
-            uint32_t groupSize = glm::min(kLocationCodeSorterMaxGroupSize, hashTableCapacity >> 1);
+            uint32_t groupSize = std::min(kLocationCodeSorterMaxGroupSize, hashTableCapacity >> 1);
 
             if (!mpSortLocationCodesPass)
             {
-                Program::DefineList definesList;
+                DefineList definesList;
                 definesList.add("GROUP_SIZE", std::to_string(groupSize));
                 definesList.add("BUFFER_SIZE", std::to_string(hashTableCapacity));
                 definesList.add("LOCAL_BMS", std::to_string(kSDFSVOLocationCodeLocalBMS));
@@ -249,8 +260,8 @@ namespace Falcor
                 definesList.add("BIG_FLIP", std::to_string(kSDFSVOLocationCodeBigFlip));
                 definesList.add("BIG_DISPERSE", std::to_string(kSDFSVOLocationCodeBigDisperse));
 
-                Program::Desc desc;
-                desc.addShaderLibrary(kSDFSVOLocationCodeSorterShaderName).csEntry("main").setShaderModel("6_5");
+                ProgramDesc desc;
+                desc.addShaderLibrary(kSDFSVOLocationCodeSorterShaderName).csEntry("main");
                 mpSortLocationCodesPass = ComputePass::create(mpDevice, desc, definesList);
             }
             else
@@ -259,8 +270,9 @@ namespace Falcor
                 mpSortLocationCodesPass->addDefine("BUFFER_SIZE", std::to_string(hashTableCapacity));
             }
 
-            auto cbVar = mpSortLocationCodesPass["CB"];
-            mpSortLocationCodesPass["gBuffer"] = mpLocationCodesBuffer;
+            auto rootVar = mpSortLocationCodesPass->getRootVar();
+            auto cbVar = rootVar["CB"];
+            rootVar["gBuffer"] = mpLocationCodesBuffer;
             uint32_t dispatchSize = hashTableCapacity >> 1;
 
             // Dispatch a local bitonic merge sort (BMS) that will sort as many elements as possible in group memory.
@@ -297,7 +309,7 @@ namespace Falcor
         }
 
         // Copy child count from staging buffer to CPU.
-        mpReadbackFence->syncCpu();
+        mpReadbackFence->wait();
         const uint32_t* pVoxelCountPerLevel = reinterpret_cast<const uint32_t*>(mpVoxelCountPerLevelStagingBuffer->map(Buffer::MapType::Read));
         std::memcpy(voxelCountsPerLevel.data(), pVoxelCountPerLevel, sizeof(uint32_t) * (mLevelCount - 1));
         mpVoxelCountPerLevelStagingBuffer->unmap();
@@ -314,18 +326,19 @@ namespace Falcor
         {
             if (!mpWriteSVOOffsetsPass)
             {
-                Program::Desc desc;
-                desc.addShaderLibrary(kSDFSVOWriteSVOOffsetsShaderName).csEntry("main").setShaderModel("6_5");
+                ProgramDesc desc;
+                desc.addShaderLibrary(kSDFSVOWriteSVOOffsetsShaderName).csEntry("main");
                 mpWriteSVOOffsetsPass = ComputePass::create(mpDevice, desc);
             }
 
-            auto cbVar = mpWriteSVOOffsetsPass["CB"];
+            auto rootVar = mpWriteSVOOffsetsPass->getRootVar();
+            auto cbVar = rootVar["CB"];
             cbVar["gLocationCodeStartOffset"] = hashTableCapacity - mSVOElementCount;
             cbVar["gVoxelCount"] = mSVOElementCount;
-            auto hashTableVar = mpWriteSVOOffsetsPass["gVoxelHashTable"];
+            auto hashTableVar = rootVar["gVoxelHashTable"];
             hashTableVar["buffer"] = mpHashTableBuffer;
             hashTableVar["capacity"] = hashTableCapacity;
-            mpWriteSVOOffsetsPass["gLocationCodes"] = mpLocationCodesBuffer;
+            rootVar["gLocationCodes"] = mpLocationCodesBuffer;
 
             mpWriteSVOOffsetsPass->execute(pRenderContext, mSVOElementCount, 1);
         }
@@ -336,26 +349,27 @@ namespace Falcor
             uint32_t requiredSVOSize = mSVOElementCount * sizeof(SDFSVOVoxel);
             if (!mpSVOBuffer || mpSVOBuffer->getSize() < requiredSVOSize)
             {
-                mpSVOBuffer = Buffer::create(mpDevice.get(), requiredSVOSize);
+                mpSVOBuffer = mpDevice->createBuffer(requiredSVOSize);
             }
 
             if (!mpBuildOctreePass)
             {
-                Program::Desc desc;
-                desc.addShaderLibrary(kSDFSVOBuildOctreeShaderName).csEntry("main").setShaderModel("6_5");
+                ProgramDesc desc;
+                desc.addShaderLibrary(kSDFSVOBuildOctreeShaderName).csEntry("main");
                 mpBuildOctreePass = ComputePass::create(mpDevice, desc);
             }
 
             // Build the SVO from the levels hash table.
             {
-                auto cbVar = mpBuildOctreePass["CB"];
+                auto rootVar = mpBuildOctreePass->getRootVar();
+                auto cbVar = rootVar["CB"];
                 cbVar["gLocationCodeStartOffset"] = hashTableCapacity - mSVOElementCount;
                 cbVar["gVoxelCount"] = mSVOElementCount;
-                auto hashTableVar = mpBuildOctreePass["gVoxelHashTable"];
+                auto hashTableVar = rootVar["gVoxelHashTable"];
                 hashTableVar["buffer"] = mpHashTableBuffer;
                 hashTableVar["capacity"] = hashTableCapacity;
-                mpBuildOctreePass["gLocationCodes"] = mpLocationCodesBuffer;
-                mpBuildOctreePass["gSVO"] = mpSVOBuffer;
+                rootVar["gLocationCodes"] = mpLocationCodesBuffer;
+                rootVar["gSVO"] = mpSVOBuffer;
 
                 mpBuildOctreePass->execute(pRenderContext, mSVOElementCount, 1);
             }
@@ -378,9 +392,14 @@ namespace Falcor
         }
     }
 
-    void SDFSVO::setShaderData(const ShaderVar& var) const
+    const ref<Buffer>& SDFSVO::getAABBBuffer() const
     {
-        if (!mpSVOBuffer) throw RuntimeError("SDFSVO::setShaderData() can't be called before calling SDFSVO::createResources()!");
+        return mpSharedData->pUnitAABBBuffer;
+    }
+
+    void SDFSVO::bindShaderData(const ShaderVar& var) const
+    {
+        if (!mpSVOBuffer) FALCOR_THROW("SDFSVO::bindShaderData() can't be called before calling SDFSVO::createResources()!");
 
         var["svo"] = mpSVOBuffer;
         var["levelCount"] = mLevelCount;
@@ -394,10 +413,10 @@ namespace Falcor
         uint32_t valueCount = gridWidthInValues * gridWidthInValues * gridWidthInValues;
         mValues.resize(valueCount);
 
-        float normalizationMultipler = mGridWidth / (0.5f * glm::root_three<float>());
+        float normalizationMultipler = mGridWidth / (0.5f * float(M_SQRT3));
         for (uint32_t v = 0; v < valueCount; v++)
         {
-            float normalizedValue = glm::clamp(cornerValues[v] * normalizationMultipler, -1.0f, 1.0f);
+            float normalizedValue = std::clamp(cornerValues[v] * normalizationMultipler, -1.0f, 1.0f);
 
             float integerScale = normalizedValue * float(INT8_MAX);
             mValues[v] = integerScale >= 0.0f ? int8_t(integerScale + 0.5f) : int8_t(integerScale - 0.5f);

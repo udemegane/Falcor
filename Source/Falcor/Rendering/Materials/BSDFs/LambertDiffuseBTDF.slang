@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -28,16 +28,16 @@
 #include "Utils/Math/MathConstants.slangh"
 
 import Utils.Math.MathHelpers;
-import Utils.Color.ColorHelpers;
 __exported import Rendering.Materials.IBSDF;
 
 /**
  * Lambertian diffuse transmission.
  */
-struct LambertDiffuseBTDF : IBSDF
+struct LambertDiffuseBTDF : IBSDF, IDifferentiable
 {
     float3 albedo; ///< Diffuse albedo.
 
+    [Differentiable]
     float3 eval<S : ISampleGenerator>(const float3 wi, const float3 wo, inout S sg)
     {
         if (min(wi.z, -wo.z) < kMinCosTheta)

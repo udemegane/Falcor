@@ -27,6 +27,7 @@
  **************************************************************************/
 #pragma once
 #include "Program.h"
+#include "Core/Macros.h"
 #include "Core/API/fwd.h"
 
 #include <memory>
@@ -34,10 +35,10 @@
 namespace Falcor
 {
 
-class ProgramManager
+class FALCOR_API ProgramManager
 {
 public:
-    ProgramManager(std::weak_ptr<Device> pDevice);
+    ProgramManager(Device* pDevice);
 
     /**
      * Defines flags that should be forcefully disabled or enabled on all shaders.
@@ -45,8 +46,8 @@ public:
      */
     struct ForcedCompilerFlags
     {
-        Shader::CompilerFlags enabled = Shader::CompilerFlags::None;  ///< Compiler flags forcefully enabled on all shaders
-        Shader::CompilerFlags disabled = Shader::CompilerFlags::None; ///< Compiler flags forcefully enabled on all shaders
+        SlangCompilerFlags enabled = SlangCompilerFlags::None;  ///< Compiler flags forcefully enabled on all shaders
+        SlangCompilerFlags disabled = SlangCompilerFlags::None; ///< Compiler flags forcefully enabled on all shaders
     };
 
     struct CompilationStats
@@ -59,22 +60,29 @@ public:
         double programKernelsTotalTime = 0.0;
     };
 
-    Program::Desc applyForcedCompilerFlags(Program::Desc desc) const;
-    void registerProgramForReload(const Program::SharedPtr& pProg);
+    ProgramDesc applyForcedCompilerFlags(ProgramDesc desc) const;
+    void registerProgramForReload(Program* program);
+    void unregisterProgramForReload(Program* program);
 
-    ProgramVersion::SharedPtr createProgramVersion(const Program& program, std::string& log) const;
+    ref<const ProgramVersion> createProgramVersion(const Program& program, std::string& log) const;
 
-    ProgramKernels::SharedPtr ProgramManager::createProgramKernels(
+    ref<const ProgramKernels> createProgramKernels(
         const Program& program,
         const ProgramVersion& programVersion,
         const ProgramVars& programVars,
         std::string& log
     ) const;
 
-    EntryPointGroupKernels::SharedPtr createEntryPointGroupKernels(
-        const std::vector<Shader::SharedPtr>& shaders,
-        EntryPointBaseReflection::SharedPtr const& pReflector
+    ref<const EntryPointGroupKernels> createEntryPointGroupKernels(
+        const std::vector<ref<EntryPointKernel>>& kernels,
+        const ref<EntryPointBaseReflection>& pReflector
     ) const;
+
+    /// Get the global HLSL language prelude.
+    std::string getHlslLanguagePrelude() const;
+
+    /// Set the global HLSL language prelude.
+    void setHlslLanguagePrelude(const std::string& prelude);
 
     /**
      * Reload and relink all programs.
@@ -87,13 +95,25 @@ public:
      * Add a list of defines applied to all programs.
      * @param[in] defineList List of macro definitions.
      */
-    void addGlobalDefines(const Program::DefineList& defineList);
+    void addGlobalDefines(const DefineList& defineList);
 
     /**
      * Remove a list of defines applied to all programs.
      * @param[in] defineList List of macro definitions.
      */
-    void removeGlobalDefines(const Program::DefineList& defineList);
+    void removeGlobalDefines(const DefineList& defineList);
+
+    /**
+     * Set compiler arguments applied to all programs.
+     * @param[in] args Compiler arguments.
+     */
+    void setGlobalCompilerArguments(const std::vector<std::string>& args) { mGlobalCompilerArguments = args; }
+
+    /**
+     * Get compiler arguments applied to all programs.
+     * @return List of compiler arguments.
+     */
+    const std::vector<std::string>& getGlobalCompilerArguments() const { return mGlobalCompilerArguments; }
 
     /**
      * Enable/disable global generation of shader debug info.
@@ -127,12 +147,13 @@ public:
 private:
     SlangCompileRequest* createSlangCompileRequest(const Program& program) const;
 
-    std::weak_ptr<Device> mpDevice;
+    Device* mpDevice;
 
-    std::vector<std::weak_ptr<Program>> mLoadedPrograms;
+    std::vector<Program*> mLoadedPrograms;
     mutable CompilationStats mCompilationStats;
 
-    Program::DefineList mGlobalDefineList;
+    DefineList mGlobalDefineList;
+    std::vector<std::string> mGlobalCompilerArguments;
     bool mGenerateDebugInfo = false;
     ForcedCompilerFlags mForcedCompilerFlags;
 

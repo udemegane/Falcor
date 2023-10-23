@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -54,7 +54,7 @@ struct ClothMaterial : MaterialBase, IMaterial
 
         // Calculate the specular reflectance for dielectrics from the IoR, as in the Disney BSDF [Burley 2015].
         // UE4 uses 0.08 multiplied by a default specular value of 0.5, hence F0=0.04 as default. The default IoR=1.5 gives the same result.
-        float f = (data.IoR - 1.f) / (data.IoR + 1.f);
+        float f = (header.getIoR() - 1.f) / (header.getIoR() + 1.f);
         float F0 = f * f;
 
         brdf.diffuseColor = baseColor;
@@ -62,28 +62,34 @@ struct ClothMaterial : MaterialBase, IMaterial
         brdf.roughness = spec.g;                // TODO: Linear or squared roughness?
         brdf.f0 = float3(F0);                   // TODO: What's appropriate here?
 
+#if defined(SCENE_DIFFUSE_ALBEDO_MULTIPLIER)
         // DEMO21
-        if (Scene::kDiffuseAlbedoMultiplier != 1.f)
+        if (SCENE_DIFFUSE_ALBEDO_MULTIPLIER != 1.f)
         {
-            brdf.diffuseColor = saturate(brdf.diffuseColor * Scene::kDiffuseAlbedoMultiplier);
+            brdf.diffuseColor = saturate(brdf.diffuseColor * SCENE_DIFFUSE_ALBEDO_MULTIPLIER);
         }
+#endif
 
         // Compute final shading frame.
-        ShadingFrame sf = ShadingFrame(sd);
+        ShadingFrame sf = sd.frame;
+        if (isNormalMappingEnabled(hints))
+        {
+            float3 encodedNormal = ms.sampleTexture(data.texNormalMap, s, sd.uv, float4(0.f), lod).rgb;
+            sf = computeShadingFrameFromNormalMap(sd, data.getNormalMapType(), encodedNormal);
+        }
+        flipShadingNormal(sd, sf);
+        if (isAdjustShadingNormalEnabled(hints))
+        {
+            adjustShadingNormal(sd, sf);
+        }
 
         return ClothMaterialInstance(sf, brdf);
     }
 
-    void modifyTangentSpace(const MaterialSystem ms, const ITextureSampler lod, inout ShadingData sd)
+    [Differentiable]
+    ClothMaterialInstance setupDiffMaterialInstance(out DiffMaterialData diffData, const MaterialSystem ms, const ShadingData sd, const ITextureSampler lod, const uint hints)
     {
-        SamplerState s = ms.getTextureSampler(header.getDefaultTextureSamplerID());
-        float3 encodedNormal = ms.sampleTexture(data.texNormalMap, s, sd.uv, float4(0.f), lod).rgb;
-        applyNormalMap(sd, data.getNormalMapType(), encodedNormal);
-    }
-
-    float evalOpacity(const MaterialSystem ms, const VertexData v, const ITextureSampler lod)
-    {
-        SamplerState s = ms.getTextureSampler(header.getDefaultTextureSamplerID());
-        return ms.sampleTexture(data.texBaseColor, s, v.texC, data.baseColor, lod).a;
+        diffData = DiffMaterialData();
+        return no_diff setupMaterialInstance(ms, sd, lod, hints);
     }
 };

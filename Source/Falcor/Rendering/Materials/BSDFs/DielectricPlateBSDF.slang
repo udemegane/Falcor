@@ -27,13 +27,10 @@
  **************************************************************************/
 #include "Utils/Math/MathConstants.slangh"
 
-__exported import Rendering.Materials.IMaterialInstance;
-__exported import Rendering.Materials.BxDF;
-__exported import Rendering.Materials.AnisotropicGGX;
-import Utils.Color.ColorHelpers;
 import Utils.Math.MathHelpers;
 import Rendering.Materials.Fresnel;
-import Utils.Debug.PixelDebug;
+import Rendering.Materials.AnisotropicGGX;
+__exported import Rendering.Materials.IBSDF;
 
 /**
  * Thin (architectural) dielectric to simulate plane parallel materials on a single polygon.
@@ -77,6 +74,11 @@ struct DielectricPlateBSDF : IBSDF
 
     bool sample<S : ISampleGenerator>(float3 wiLocal, out float3 wo, out float pdf, out float3 weight, out uint lobeType, inout S sg)
     {
+        wo = {};
+        pdf = {};
+        weight = {};
+        lobeType = {};
+
         float relEta = eta;
         const float etaRefract = 1.005f;
 

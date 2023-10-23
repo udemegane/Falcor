@@ -28,6 +28,7 @@
 import Scene.Material.MaterialData;
 import Scene.HitInfo;
 import Utils.Geometry.GeometryHelpers;
+import Utils.Math.ShadingFrame;
 
 /** This struct holds information needed for shading a hit point.
 
@@ -43,27 +44,27 @@ import Utils.Geometry.GeometryHelpers;
     The material instance has interfaces for sampling and evaluation, as well as for
     querying its properties at the hit.
 */
-struct ShadingData
+struct ShadingData : IDifferentiable
 {
     // Geometry data
-    float3  posW;                   ///< Shading hit position in world space.
-    float3  V;                      ///< View direction, -incident direction (-ray.dir)
-    // N,T,B is an orthonormal basis representing the interpolated shading frame in world space at the shading point.
-    // Handedness is determined by the MikkTSpace library and stored in tangentW.w on the mesh, where B = cross(N, T) * tangentW.w.
-    float3  N;                      ///< Shading normal at shading hit. Normalized.
-    float3  T;                      ///< Shading tangent at shading hit. Normalized.
-    float3  B;                      ///< Shading bitangent at shading hit. Normalized.
-    float2  uv;                     ///< Texture mapping coordinates.
-    float3  faceN;                  ///< Face normal in world space, always on the front-facing side.
-    float4  tangentW;               ///< Geometric tangent (xyz) and sign (w) in world space. This is used for orthogonalization. Not normalized, but it is guaranteed to be nonzero and sign (w) is +-1.0.
-    bool    frontFacing;            ///< True if primitive seen from the front-facing side.
-    float   curveRadius;            ///< Curve cross-sectional radius. Valid only for geometry generated from curves.
+    float3  posW;                       ///< Shading hit position in world space.
+    float3  V;                          ///< View direction, -incident direction (-ray.dir)
+    float2  uv;                         ///< Texture mapping coordinates.
+
+    ShadingFrame frame;                 ///< Smooth interpolated shading frame in world space at the shading point. The normal is *not* automatically flipped for backfacing hits.
+    no_diff float3  faceN;              ///< Face normal in world space, always on the front-facing side.
+    no_diff float4  tangentW;           ///< Geometric tangent (xyz) and sign (w) in world space. This is used for orthogonalization. Not normalized, but it is guaranteed to be nonzero and sign (w) is +-1.0.
+    bool            frontFacing;        ///< True if primitive seen from the front-facing side, i.e., dot(V, faceN) >= 0.0.
+    no_diff float   curveRadius;        ///< Curve cross-sectional radius. Valid only for geometry generated from curves.
 
     // Material data
-    MaterialHeader mtl;             ///< Material header data.
-    uint    materialID;             ///< Material ID at shading location.
-    float   opacity;                ///< Opacity value in [0,1]. This is used for alpha testing.
-    float   IoR;                    ///< Index of refraction for the medium on the front-facing side (i.e. "outside" the material at the hit).
+    MaterialHeader mtl;                 ///< Material header data.
+    uint    materialID;                 ///< Material ID at shading location.
+    float   IoR;                        ///< Index of refraction for the medium on the front-facing side (i.e. "outside" the material at the hit).
+
+    uint materialGradOffset;            ///< Offset to the material gradient in the gradient buffer.
+    uint geometryGradOffset;            ///< Offset to the geometry gradient in the gradient buffer.
+    uint threadID;                      ///< Thread ID for gradient aggregation with a hash grid.
 
 
     // Utility functions
@@ -74,34 +75,16 @@ struct ShadingData
         \param[in] viewside True if the origin should be on the view side (reflection) or false otherwise (transmission).
         \return Ray origin of the new ray.
     */
-    float3 computeNewRayOrigin(bool viewside = true)
+    float3 computeRayOrigin(bool viewside = true)
     {
         return computeRayOrigin(posW, (frontFacing == viewside) ? faceN : -faceN);
     }
 
-    /** Transform vector from the local surface frame to world space.
-        \param[in] v Vector in local space.
-        \return Vector in world space.
+    /** Returns the oriented face normal.
+        \return Face normal flipped to the same side as the view vector.
     */
-    float3 fromLocal(float3 v)
+    float3 getOrientedFaceNormal()
     {
-        return T * v.x + B * v.y + N * v.z;
-    }
-
-    /** Transform vector from world space to the local surface frame.
-        \param[in] v Vector in world space.
-        \return Vector in local space.
-    */
-    float3 toLocal(float3 v)
-    {
-        return float3(dot(v, T), dot(v, B), dot(v, N));
-    }
-
-    /** Returns sign that gets applied to such that B = cross(N, T) * getHandednessSign();
-        \return +1 for right handed, and -1 for left handed frames.
-    */
-    float getHandednessSign()
-    {
-        return dot(cross(N, T), B) >= 0.f ? 1.f : -1.f;
+        return frontFacing ? faceN : -faceN;
     }
 };

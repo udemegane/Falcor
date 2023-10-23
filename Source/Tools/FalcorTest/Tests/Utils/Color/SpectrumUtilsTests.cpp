@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -61,7 +61,7 @@ GPU_TEST(WavelengthToXYZ)
 
     // Verify results.
     float3 maxSqrError = {};
-    const float3* result = ctx.mapBuffer<const float3>("result");
+    std::vector<float3> result = ctx.readBuffer<float3>("result");
     for (uint32_t i = 0; i < n; i++)
     {
         float lambda = wavelengths[i];
@@ -73,9 +73,8 @@ GPU_TEST(WavelengthToXYZ)
         EXPECT_GE(res.z, 0.f);
 
         float3 e = ref - res;
-        maxSqrError = glm::max(maxSqrError, e * e);
+        maxSqrError = max(maxSqrError, e * e);
     }
-    ctx.unmapBuffer("result");
 
     EXPECT_LE(maxSqrError.x, 2.0e-4f);
     EXPECT_LE(maxSqrError.y, 6.6e-5f);

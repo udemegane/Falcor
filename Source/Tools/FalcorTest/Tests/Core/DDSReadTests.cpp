@@ -41,12 +41,12 @@ namespace
 {
 void testDDS(GPUUnitTestContext& ctx, const std::string& testName, ResourceFormat fmt, bool expectLoadFailure)
 {
-    Device* pDevice = ctx.getDevice().get();
+    ref<Device> pDevice = ctx.getDevice();
 
     // Read input DDS file
     std::filesystem::path ddsPath = getRuntimeDirectory() / fmt::format("data/tests/{}.dds", testName);
 
-    Texture::SharedPtr pDDSTex;
+    ref<Texture> pDDSTex;
     // Note that we can always specify loadAsSrgb=false, even when fmt is sRGB, because
     // the flag is a no-op if the format encoded in the DDS file specifies a nonlinear format.
     try
@@ -73,7 +73,7 @@ void testDDS(GPUUnitTestContext& ctx, const std::string& testName, ResourceForma
     // Read reference image.  If no reference image exists, the test will fail, and a reference image will be output.
     std::filesystem::path refPath = getRuntimeDirectory() / fmt::format("data/tests/{}-ref.png", testName);
 
-    Texture::SharedPtr pPngTex;
+    ref<Texture> pPngTex;
     if (std::filesystem::exists(refPath))
     {
         pPngTex = Texture::createFromFile(pDevice, refPath, false, false);
@@ -83,10 +83,15 @@ void testDDS(GPUUnitTestContext& ctx, const std::string& testName, ResourceForma
     EXPECT_EQ(pDDSTex->getFormat(), fmt);
 
     // Create uncompressed destination texture
-    Texture::SharedPtr pSrcTex = pDDSTex;
+    ref<Texture> pSrcTex = pDDSTex;
     ResourceFormat destFormat = ResourceFormat::RGBA32Float;
-    auto pDst = Texture::create2D(
-        pDevice, pDDSTex->getWidth(), pDDSTex->getHeight(), destFormat, 1, 1, nullptr,
+    auto pDst = pDevice->createTexture2D(
+        pDDSTex->getWidth(),
+        pDDSTex->getHeight(),
+        destFormat,
+        1,
+        1,
+        nullptr,
         ResourceBindFlags::ShaderResource | ResourceBindFlags::RenderTarget
     );
 
@@ -96,14 +101,14 @@ void testDDS(GPUUnitTestContext& ctx, const std::string& testName, ResourceForma
     if (pPngTex)
     {
         // Create program to compare decompressed image with reference image
-        ctx.createProgram("Tests/Core/DDSReadTests.cs.slang", "diff", Program::DefineList(), Shader::CompilerFlags::None);
+        ctx.createProgram("Tests/Core/DDSReadTests.cs.slang", "diff");
         ctx.allocateStructuredBuffer("difference", 4 * sizeof(float) * pDst->getWidth() * pDst->getHeight());
         ctx["ref"] = pPngTex; // Reference
     }
     else
     {
         // Create program to copy decompressed image so that we can save it as the reference
-        ctx.createProgram("Tests/Core/DDSReadTests.cs.slang", "readback", Program::DefineList(), Shader::CompilerFlags::None);
+        ctx.createProgram("Tests/Core/DDSReadTests.cs.slang", "readback");
         ctx.allocateStructuredBuffer("result", 4 * sizeof(uint32_t) * pDst->getWidth() * pDst->getHeight());
     }
 
@@ -115,42 +120,41 @@ void testDDS(GPUUnitTestContext& ctx, const std::string& testName, ResourceForma
     if (pPngTex)
     {
         // Create texture from difference data
-        const uint8_t* diff = ctx.mapBuffer<const uint8_t>("difference");
-        EXPECT(diff != nullptr);
-        Texture::SharedPtr pDiffTex(Texture::create2D(pDevice, dstDim.x, dstDim.y, ResourceFormat::RGBA32Float, 1, 1, diff));
-        ctx.unmapBuffer("difference");
+        std::vector<uint8_t> diff = ctx.readBuffer<uint8_t>("difference");
+        ref<Texture> pDiffTex(pDevice->createTexture2D(dstDim.x, dstDim.y, ResourceFormat::RGBA32Float, 1, 1, diff.data()));
 
         // Analyze difference texture
-        TextureAnalyzer::SharedPtr analyzer(TextureAnalyzer::create(ctx.getDevice()));
-        auto pResultBuffer = Buffer::create(
-            pDevice, TextureAnalyzer::getResultSize(), ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess
-        );
-        analyzer->analyze(ctx.getRenderContext(), pDiffTex, 0, 0, pResultBuffer);
-        const TextureAnalyzer::Result* result = static_cast<const TextureAnalyzer::Result*>(pResultBuffer->map(Buffer::MapType::Read));
+        TextureAnalyzer analyzer(pDevice);
+        auto pResultBuffer =
+            pDevice->createBuffer(TextureAnalyzer::getResultSize(), ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
+        analyzer.analyze(ctx.getRenderContext(), pDiffTex, 0, 0, pResultBuffer);
+        TextureAnalyzer::Result result = pResultBuffer->getElement<TextureAnalyzer::Result>(0);
 
         // Expect difference image to be uniform 0.
-        EXPECT(result->isConstant(TextureChannelFlags::Red));
-        EXPECT(result->isConstant(TextureChannelFlags::Green));
-        EXPECT(result->isConstant(TextureChannelFlags::Blue));
-        EXPECT(result->isConstant(TextureChannelFlags::Alpha));
-        EXPECT_EQ(result->value.r, 0.f);
-        EXPECT_EQ(result->value.g, 0.f);
-        EXPECT_EQ(result->value.b, 0.f);
-        EXPECT_EQ(result->value.a, 0.f);
-        pResultBuffer->unmap();
+        EXPECT(result.isConstant(TextureChannelFlags::Red));
+        EXPECT(result.isConstant(TextureChannelFlags::Green));
+        EXPECT(result.isConstant(TextureChannelFlags::Blue));
+        EXPECT(result.isConstant(TextureChannelFlags::Alpha));
+        EXPECT_EQ(result.value.r, 0.f);
+        EXPECT_EQ(result.value.g, 0.f);
+        EXPECT_EQ(result.value.b, 0.f);
+        EXPECT_EQ(result.value.a, 0.f);
     }
     else
     {
         // Save newly-created reference image
-        const uint8_t* result = ctx.mapBuffer<const uint8_t>("result");
-        EXPECT(result != nullptr);
-
-        Bitmap::UniqueConstPtr resultBitmap(Bitmap::create(dstDim.x, dstDim.y, ResourceFormat::RGBA8Unorm, (const uint8_t*)result));
+        std::vector<uint8_t> result = ctx.readBuffer<uint8_t>("result");
+        Bitmap::UniqueConstPtr resultBitmap(Bitmap::create(dstDim.x, dstDim.y, ResourceFormat::RGBA8Unorm, result.data()));
         Bitmap::saveImage(
-            refPath, dstDim.x, dstDim.y, Bitmap::FileFormat::PngFile, Bitmap::ExportFlags::Uncompressed | Bitmap::ExportFlags::ExportAlpha,
-            ResourceFormat::RGBA8Unorm, false, (void*)result
+            refPath,
+            dstDim.x,
+            dstDim.y,
+            Bitmap::FileFormat::PngFile,
+            Bitmap::ExportFlags::Uncompressed | Bitmap::ExportFlags::ExportAlpha,
+            ResourceFormat::RGBA8Unorm,
+            false,
+            result.data()
         );
-        ctx.unmapBuffer("result");
     }
 }
 } // namespace

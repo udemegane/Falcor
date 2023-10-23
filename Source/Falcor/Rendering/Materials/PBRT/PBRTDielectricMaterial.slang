@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -41,26 +41,31 @@ struct PBRTDielectricMaterial : MaterialBase, IMaterial
         SamplerState s = ms.getTextureSampler(header.getDefaultTextureSamplerID());
 
         const float2 roughness = ms.sampleTexture(data.texSpecular, s, sd.uv, data.specular, lod).rg;
-        float eta = !sd.frontFacing ? 1.0f / data.IoR : data.IoR;
+        float16_t IoR = header.getIoR();
+        float eta = !sd.frontFacing ? 1.0f / IoR : IoR;
 
         // Compute final shading frame.
-        ShadingFrame sf = ShadingFrame(sd);
+        // Do not flip the shading normal for backfacing hits. The BSDF handles transmission from both sides.
+        ShadingFrame sf = sd.frame;
+        if (isNormalMappingEnabled(hints))
+        {
+            float3 encodedNormal = ms.sampleTexture(data.texNormalMap, s, sd.uv, float4(0.f), lod).rgb;
+            sf = computeShadingFrameFromNormalMap(sd, data.getNormalMapType(), encodedNormal);
+        }
+        if (isAdjustShadingNormalEnabled(hints))
+        {
+            adjustShadingNormal(sd, sf);
+        }
 
         PBRTDielectricMaterialInstance mi = {sf, {AnisotropicGGX(roughness), eta}};
 
         return mi;
     }
 
-    void modifyTangentSpace(const MaterialSystem ms, const ITextureSampler lod, inout ShadingData sd)
+    [Differentiable]
+    PBRTDielectricMaterialInstance setupDiffMaterialInstance(out DiffMaterialData diffData, const MaterialSystem ms, const ShadingData sd, const ITextureSampler lod, const uint hints)
     {
-        SamplerState s = ms.getTextureSampler(header.getDefaultTextureSamplerID());
-        float3 encodedNormal = ms.sampleTexture(data.texNormalMap, s, sd.uv, float4(0.f), lod).rgb;
-        applyNormalMap(sd, data.getNormalMapType(), encodedNormal);
-    }
-
-    float evalOpacity(const MaterialSystem ms, const VertexData v, const ITextureSampler lod)
-    {
-        SamplerState s = ms.getTextureSampler(header.getDefaultTextureSamplerID());
-        return ms.sampleTexture(data.texBaseColor, s, v.texC, data.baseColor, lod).a;
+        diffData = DiffMaterialData();
+        return no_diff setupMaterialInstance(ms, sd, lod, hints);
     }
 };

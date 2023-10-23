@@ -38,6 +38,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <algorithm>
 
 namespace Falcor
 {
@@ -49,10 +50,9 @@ namespace Falcor
     */
     class FALCOR_API GridVolume : public Animatable
     {
+        FALCOR_OBJECT(GridVolume)
     public:
-        using SharedPtr = std::shared_ptr<GridVolume>;
-
-        using GridSequence = std::vector<Grid::SharedPtr>;
+        using GridSequence = std::vector<ref<Grid>>;
 
         /** Flags indicating if and what was updated in the volume.
         */
@@ -83,11 +83,9 @@ namespace Falcor
             Blackbody,
         };
 
-        /** Create a new volume.
-            \param[in] pDevice GPU device.
-            \param[in] name The volume name.
-        */
-        static SharedPtr create(std::shared_ptr<Device> pDevice, const std::string& name);
+        static ref<GridVolume> create(ref<Device> pDevice, const std::string& name) { return make_ref<GridVolume>(pDevice, name); }
+
+        GridVolume(ref<Device> pDevice, const std::string& name);
 
         /** Render the UI.
             \return True if the volume was modified.
@@ -118,6 +116,15 @@ namespace Falcor
             \return Returns true if grid was loaded successfully.
         */
         bool loadGrid(GridSlot slot, const std::filesystem::path& path, const std::string& gridname);
+
+        /** Create a GridSequence from a list of files.
+            \param[in] pDevice GPU device
+            \param[in] paths File paths of the grids. Can also include a full path or relative path from a data directory.
+            \param[in] gridname Name of the grid to load.
+            \param[in] keepEmpty Add empty (nullptr) grids to the sequence if one cannot be loaded from the file.
+            \return Returns the resulting GridSequence
+        */
+        static GridSequence createGridSequence(ref<Device> pDevice, const std::vector<std::filesystem::path>& paths, const std::string& gridname, bool keepEmpty = true);
 
         /** Load a sequence of grids from files to a grid slot.
             Note: This will replace any existing grid sequence for that slot.
@@ -150,15 +157,15 @@ namespace Falcor
         /** Set the grid for the specified slot.
             Note: This will replace any existing grid sequence for that slot with just a single grid.
         */
-        void setGrid(GridSlot slot, const Grid::SharedPtr& grid);
+        void setGrid(GridSlot slot, const ref<Grid>& grid);
 
         /** Get the current grid from the specified slot.
         */
-        const Grid::SharedPtr& getGrid(GridSlot slot) const;
+        const ref<Grid>& getGrid(GridSlot slot) const;
 
         /** Get a list of all grids used for this volume.
         */
-        std::vector<Grid::SharedPtr> getAllGrids() const;
+        std::vector<ref<Grid>> getAllGrids() const;
 
         /** Sets the current frame of the grid sequence to use.
         */
@@ -181,6 +188,14 @@ namespace Falcor
         */
         double getFrameRate() const { return mFrameRate; }
 
+        /** Set the grid playback start frame.
+        */
+        void setStartFrame(uint32_t frame) { mStartFrame = mGridFrameCount > 0 ? std::clamp(frame, (uint32_t)0, mGridFrameCount - 1) : 0; }
+
+        /** Get the grid playback start frame
+        */
+        uint32_t getStartFrame() const { return mStartFrame; }
+
         /** Enable/disable grid playback.
         */
         void setPlaybackEnabled(bool enabled);
@@ -195,11 +210,11 @@ namespace Falcor
 
         /** Set the density grid.
         */
-        void setDensityGrid(const Grid::SharedPtr& densityGrid) { setGrid(GridSlot::Density, densityGrid); };
+        void setDensityGrid(const ref<Grid>& densityGrid) { setGrid(GridSlot::Density, densityGrid); };
 
         /** Get the density grid.
         */
-        const Grid::SharedPtr& getDensityGrid() const { return getGrid(GridSlot::Density); }
+        const ref<Grid>& getDensityGrid() const { return getGrid(GridSlot::Density); }
 
         /** Set the density scale factor.
         */
@@ -211,11 +226,11 @@ namespace Falcor
 
         /** Set the emission grid.
         */
-        void setEmissionGrid(const Grid::SharedPtr& emissionGrid) { setGrid(GridSlot::Emission, emissionGrid); }
+        void setEmissionGrid(const ref<Grid>& emissionGrid) { setGrid(GridSlot::Emission, emissionGrid); }
 
         /** Get the emission grid.
         */
-        const Grid::SharedPtr& getEmissionGrid() const { return getGrid(GridSlot::Emission); }
+        const ref<Grid>& getEmissionGrid() const { return getGrid(GridSlot::Emission); }
 
         /** Set the emission scale factor.
         */
@@ -265,28 +280,28 @@ namespace Falcor
         */
         const AABB& getBounds() const { return mBounds; }
 
-        void updateFromAnimation(const rmcv::mat4& transform) override;
+        void updateFromAnimation(const float4x4& transform) override;
 
     private:
-        GridVolume(std::shared_ptr<Device> pDevice, const std::string& name);
-
         void updateSequence();
         void updateBounds();
 
         void markUpdates(UpdateFlags updates);
         void setFlags(uint32_t flags);
 
-        std::shared_ptr<Device> mpDevice;
+        ref<Device> mpDevice;
         std::string mName;
         std::array<GridSequence, (size_t)GridSlot::Count> mGrids;
         uint32_t mGridFrame = 0;
         uint32_t mGridFrameCount = 1;
         double mFrameRate = 30.f;
+        uint32_t mStartFrame = 0;
         bool mPlaybackEnabled = false;
         AABB mBounds;
         GridVolumeData mData;
         mutable UpdateFlags mUpdates = UpdateFlags::None;
 
+        friend class Scene;
         friend class SceneCache;
     };
 

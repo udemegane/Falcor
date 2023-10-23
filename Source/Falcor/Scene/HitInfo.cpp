@@ -1,5 +1,5 @@
 /***************************************************************************
- # Copyright (c) 2015-22, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or without
  # modification, are permitted provided that the following conditions
@@ -83,7 +83,7 @@ namespace Falcor
         // Check that the final bit allocation fits.
         if (mPrimitiveIndexBits > 32 || (mTypeBits + mInstanceIDBits) > 32)
         {
-            throw RuntimeError("Scene requires > 64 bits for encoding hit info header. This is currently not supported.");
+            FALCOR_THROW("Scene requires > 64 bits for encoding hit info header. This is currently not supported.");
         }
 
         // Compute size of compressed header in bits.
@@ -105,10 +105,10 @@ namespace Falcor
 
     }
 
-    Shader::DefineList HitInfo::getDefines() const
+    DefineList HitInfo::getDefines() const
     {
         FALCOR_ASSERT((mTypeBits + mInstanceIDBits) <= 32 && mPrimitiveIndexBits <= 32);
-        Shader::DefineList defines;
+        DefineList defines;
         defines.add("HIT_INFO_DEFINES", "1");
         defines.add("HIT_INFO_USE_COMPRESSION", mUseCompression ? "1" : "0");
         defines.add("HIT_INFO_TYPE_BITS", std::to_string(mTypeBits));
