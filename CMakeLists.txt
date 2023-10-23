@@ -119,14 +119,15 @@ endif()
 include(CheckLanguage)
 check_language(CUDA)
 
-if(CMAKE_CUDA_COMPILER)
-    message(STATUS "Enabling CUDA support.")
-    enable_language(CUDA)
-    find_package(CUDAToolkit REQUIRED)
-    set(FALCOR_HAS_CUDA ON)
-else()
-    set(FALCOR_HAS_CUDA OFF)
-endif()
+# if(CMAKE_CUDA_COMPILER)
+# message(STATUS "Enabling CUDA support.")
+# enable_language(CUDA)
+# find_package(CUDAToolkit REQUIRED)
+# set(FALCOR_HAS_CUDA ON)
+# else()
+# set(FALCOR_HAS_CUDA OFF)
+# endif()
+set(FALCOR_HAS_CUDA OFF)
 
 # -----------------------------------------------------------------------------
 # Python
